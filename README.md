@@ -2,6 +2,16 @@
 
 面向windows的开源会议大屏的 Windows 启动器：一个可自定义的入口面板，加上投屏接收/发送、文件传送、白板批注等会议现场能力。
 
+## 界面
+
+| 首页（会议迎宾） | 全部应用 |
+| --- | --- |
+| ![首页](docs/shots/launcher-home.png) | ![全部应用](docs/shots/all-apps.png) |
+
+| 个性化与设置 | 文件传送 |
+| --- | --- |
+| ![个性化与设置](docs/shots/settings.png) | ![文件传送](docs/shots/file-transfer.png) |
+
 ## 功能
 
 **启动器**
