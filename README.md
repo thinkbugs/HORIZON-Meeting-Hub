@@ -31,6 +31,10 @@
 **文件传送**
 - 内置 SnapDrop 服务（自托管，默认端口 7878）：局域网任意设备打开地址即可互传，带二维码
 
+**Android 发送端**
+- `android/` 是浏览器扩展投屏协议的 Android 实现：MediaProjection + MediaCodec(H.264) 直接投到 9407 接收端，大屏侧无需改动，凭 6 位投屏码接入
+- 构建、安装与真机说明见 [android/README.md](android/README.md)，本轮验证记录见 [docs/verification-2026-10-30-android.md](docs/verification-2026-10-30-android.md)
+
 ## 技术栈
 
 | 层 | 技术 |

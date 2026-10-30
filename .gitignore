@@ -22,3 +22,14 @@ desktop.ini
 # 本地覆盖配置
 .env
 .env.*
+
+# Android 构建产物与本机 SDK 位置
+/android/.gradle
+/android/.kotlin
+/android/build
+/android/app/build
+/android/local.properties
+/android/.idea
+*.apk
+*.aab
+*.iml
