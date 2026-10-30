@@ -114,6 +114,13 @@ BUILD SUCCESSFUL
 - **断线重连**：接收端关闭后 App 显示断开原因并停止，需要重新点「开始投屏」。
 - **延迟**：手机→大屏的端到端延迟未测，因为缺少真机；协议里已经带上墙钟 pts，
   真机接通后可直接用接收端的延迟读数补测。
+- **模拟器也走不通**：为补上真机缺口，装了 `emulator 37.2.13` 与
+  `system-images;android-35;default;x86_64`（约 2 GB），建了 `medium_phone` AVD。四组组合全部
+  在初始化加速器后立刻段错误（退出码 139）：WHPX + `-no-window` + swiftshader、WHPX + 窗口 +
+  `-gpu host`、WHPX + 窗口 + swiftshader、`-accel off`（TCG）。日志停在
+  `WHPX on Windows 10.0.26200 detected` / `Windows Hypervisor Platform accelerator is operational`
+  之后，adb 始终 `offline`，一次都没进到系统。这是本机 Hyper-V/WHPX 与这版模拟器的组合问题，
+  不是 App 的问题；换模拟器版本或改用真机都可绕开。
 
 ## 8. 复现步骤
 
