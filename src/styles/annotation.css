@@ -1,0 +1,334 @@
+/* ------------------------------------------------------------
+   Annotation Overlay
+------------------------------------------------------------ */
+.annotation-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(2, 5, 10, 0.75);
+  backdrop-filter: blur(8px) saturate(0.85);
+  -webkit-backdrop-filter: blur(8px) saturate(0.85);
+  animation: annotationFadeIn 0.3s ease both;
+}
+
+@keyframes annotationFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.annotation-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.annotation-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* ------------------------------------------------------------
+   Toolbar
+------------------------------------------------------------ */
+.annotation-toolbar {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(8, 14, 23, 0.88);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  border: 1px solid rgba(192, 220, 249, 0.14);
+  border-radius: 16px;
+  box-shadow:
+    0 12px 48px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  animation: annotationToolbarEnter 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  z-index: 10;
+}
+
+@keyframes annotationToolbarEnter {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.annotation-toolbar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(201, 228, 255, 0.3), transparent);
+}
+
+.annotation-divider {
+  width: 1px;
+  height: 24px;
+  background: rgba(183, 211, 239, 0.12);
+}
+
+.annotation-tool-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------------
+   Tool Buttons
+------------------------------------------------------------ */
+.annotation-tool-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(192, 220, 249, 0.1);
+  color: rgba(226, 237, 249, 0.74);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.annotation-tool-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(192, 220, 249, 0.18);
+  color: rgba(244, 250, 255, 0.95);
+}
+
+.annotation-tool-button.is-active {
+  background: rgba(117, 183, 255, 0.15);
+  border-color: rgba(117, 183, 255, 0.3);
+  color: #75b7ff;
+  box-shadow: 0 0 0 1px rgba(117, 183, 255, 0.15);
+}
+
+.annotation-tool-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------
+   Color Picker
+------------------------------------------------------------ */
+.annotation-color-picker {
+  display: flex;
+  gap: 6px;
+}
+
+.annotation-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.annotation-color-swatch:hover {
+  transform: scale(1.1);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.annotation-color-swatch.is-active {
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.15);
+}
+
+.annotation-color-swatch.is-active::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* ------------------------------------------------------------
+   Size Control
+------------------------------------------------------------ */
+.annotation-size-control {
+  min-width: 140px;
+}
+
+.annotation-size-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(198, 215, 233, 0.52);
+}
+
+.annotation-size-slider {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(183, 211, 239, 0.12);
+  appearance: none;
+  outline: none;
+  cursor: pointer;
+}
+
+.annotation-size-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #75b7ff;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.annotation-size-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  background: #5ea8ff;
+}
+
+.annotation-size-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #75b7ff;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.annotation-size-slider::-moz-range-thumb:hover {
+  transform: scale(1.2);
+  background: #5ea8ff;
+}
+
+.annotation-size-value {
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: rgba(226, 237, 249, 0.74);
+}
+
+/* ------------------------------------------------------------
+   Action Buttons
+------------------------------------------------------------ */
+.annotation-action-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(192, 220, 249, 0.1);
+  color: rgba(226, 237, 249, 0.74);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.annotation-action-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(192, 220, 249, 0.18);
+  color: rgba(244, 250, 255, 0.95);
+}
+
+.annotation-action-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------
+   Save Button
+------------------------------------------------------------ */
+.annotation-save-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(117, 183, 255, 0.15), rgba(94, 217, 237, 0.15));
+  border: 1px solid rgba(117, 183, 255, 0.25);
+  color: #75b7ff;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.annotation-save-button:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(117, 183, 255, 0.22), rgba(94, 217, 237, 0.22));
+  border-color: rgba(117, 183, 255, 0.35);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(117, 183, 255, 0.2);
+}
+
+.annotation-save-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------
+   Close Button
+------------------------------------------------------------ */
+.annotation-close-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 125, 141, 0.08);
+  border: 1px solid rgba(255, 125, 141, 0.2);
+  color: #ff7d8d;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.annotation-close-button:hover {
+  background: rgba(255, 125, 141, 0.15);
+  border-color: rgba(255, 125, 141, 0.3);
+  transform: scale(1.05);
+}
+
+/* ------------------------------------------------------------
+   Responsive
+------------------------------------------------------------ */
+@media (max-width: 768px) {
+  .annotation-toolbar {
+    top: 16px;
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .annotation-divider {
+    height: 20px;
+  }
+
+  .annotation-size-control {
+    min-width: 120px;
+  }
+
+  .annotation-save-button span {
+    display: none;
+  }
+}

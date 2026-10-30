@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "HORIZON 投屏",
+  "version": "0.4.0",
+  "description": "把当前标签页或屏幕投到 HORIZON 会议主机：自动发现局域网内的接收端，输入大屏上的投屏码即可投放。",
+  "minimum_chrome_version": "116",
+  "action": {
+    "default_title": "HORIZON 投屏",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["storage", "offscreen", "tabCapture", "system.network"],
+  "host_permissions": ["http://*/*"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

@@ -1,0 +1,95 @@
+[package]
+name = "horizon-cast"
+version = "0.4.0"
+description = "HORIZON Meeting Hub casting engine: low-latency LAN media channel plus DLNA / AirPlay / Cast interop."
+authors = ["HORIZON"]
+edition = "2021"
+rust-version = "1.77.2"
+autobins = false
+
+[lib]
+name = "horizon_cast"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mf-probe"
+path = "src/bin/mf_probe.rs"
+
+[[bin]]
+name = "capture-probe"
+path = "src/bin/capture_probe.rs"
+
+[[bin]]
+name = "codec-bench"
+path = "src/bin/codec_bench.rs"
+
+[[bin]]
+name = "cast-bench"
+path = "src/bin/cast_bench.rs"
+
+[[bin]]
+name = "discover-probe"
+path = "src/bin/discover_probe.rs"
+
+[[bin]]
+name = "dlna-probe"
+path = "src/bin/dlna_probe.rs"
+
+[[bin]]
+name = "cast-probe"
+path = "src/bin/cast_probe.rs"
+
+[dependencies]
+socket2 = { version = "0.6", features = ["all"] }
+# The tile codec's two loss levels. `flate2` is the lossless path for text and
+# flat UI colour; `image`'s jpeg encoder is the lossy path for photographic tiles.
+# Both are already in the offline registry, which is the only registry this
+# machine can reach.
+flate2 = "1.1"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+# Cast v2 payloads are JSON on every channel. Writing a JSON parser for them
+# would be more code than the transport it serves, and this crate is already in
+# the lock file for the launcher.
+serde_json = "1.0"
+# AirPlay key derivation hashes SHA-512 everywhere. The crate is already in the
+# lock file via `image`'s tooling chain, so this costs no new download.
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+# The `implement` attribute expands to paths rooted at `windows_core`, so the
+# runtime crate must be a direct dependency under that name.
+windows-core = "0.61"
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Ole",
+  "Win32_System_Variant",
+  "Win32_System_LibraryLoader",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+  "Win32_Media_Audio",
+  "Win32_Media_MediaFoundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Networking_WinSock",
+  "Win32_Security_Cryptography",
+  "Win32_Security_Credentials",
+  # SChannel, for the Cast v2 sender's TLS channel (see `cast::tls`).
+  "Win32_Security_Authentication_Identity",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[[bin]]
+name = "airplay-probe"
+path = "src/bin/airplay_probe.rs"
+
+[[bin]]
+name = "cast-recv-probe"
+path = "src/bin/cast_recv_probe.rs"
+
+[[bin]]
+name = "browser-probe"
+path = "src/bin/browser_probe.rs"

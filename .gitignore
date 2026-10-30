@@ -1,0 +1,24 @@
+# 依赖与构建产物
+node_modules
+dist
+.vite
+target
+src-tauri/target
+src-tauri/gen
+
+# 本机验证脚本与会话配置（路径绑定本机，不入库）
+.probe
+.qoder
+
+# 本机交付定制（含客户信息）
+/oem/
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 本地覆盖配置
+.env
+.env.*

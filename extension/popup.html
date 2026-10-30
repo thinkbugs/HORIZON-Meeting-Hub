@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HORIZON 投屏</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #080b11;
+        --surface: rgba(255, 255, 255, 0.045);
+        --surface-2: rgba(255, 255, 255, 0.075);
+        --line: rgba(255, 255, 255, 0.085);
+        --line-strong: rgba(255, 255, 255, 0.15);
+        --text: #eef3fa;
+        --muted: #8f9bad;
+        --faint: #626d7e;
+        --accent: #5ad1ff;
+        --accent-deep: #23a7dc;
+        --success: #4be3a4;
+        --danger: #ff7285;
+        --warning: #ffc061;
+        --radius: 15px;
+        --radius-lg: 20px;
+        --radius-sm: 13px;
+        --radius-pill: 999px;
+        --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+      }
+
+      body {
+        width: 372px;
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.5 "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI",
+          system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: -30% -20% auto -20%;
+        height: 380px;
+        background:
+          radial-gradient(48% 60% at 22% 18%, rgba(90, 209, 255, 0.16), transparent 70%),
+          radial-gradient(42% 52% at 82% 4%, rgba(111, 127, 255, 0.14), transparent 72%);
+        filter: blur(6px);
+        pointer-events: none;
+      }
+
+      .shell {
+        position: relative;
+        padding: 15px 16px 13px;
+      }
+
+      /* ------------------------------------------------------------- header */
+
+      .bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 13px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .brand__mark {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 11px;
+        color: var(--accent);
+        background:
+          linear-gradient(160deg, rgba(90, 209, 255, 0.2), rgba(90, 209, 255, 0.05)),
+          rgba(10, 16, 24, 0.8);
+        border: 1px solid rgba(90, 209, 255, 0.28);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.14),
+          0 6px 18px -10px rgba(90, 209, 255, 0.7);
+      }
+
+      .brand__copy {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.15;
+      }
+
+      .brand__copy b {
+        font-size: 9.5px;
+        font-weight: 600;
+        letter-spacing: 0.24em;
+        color: var(--faint);
+      }
+
+      .brand__copy span {
+        margin-top: 2px;
+        font-size: 14.5px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+        transition: color 200ms var(--ease), border-color 200ms var(--ease);
+      }
+
+      .pill__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.65;
+      }
+
+      body[data-phase="live"] .pill {
+        color: var(--success);
+        border-color: rgba(75, 227, 164, 0.28);
+      }
+
+      body[data-phase="live"] .pill__dot {
+        opacity: 1;
+        box-shadow: 0 0 0 3px rgba(75, 227, 164, 0.14);
+        animation: breathe 2.2s ease-in-out infinite;
+      }
+
+      body[data-phase="connecting"] .pill {
+        color: var(--accent);
+        border-color: rgba(90, 209, 255, 0.3);
+      }
+
+      body[data-phase="connecting"] .pill__dot {
+        opacity: 1;
+        animation: breathe 1s ease-in-out infinite;
+      }
+
+      body[data-phase="error"] .pill {
+        color: var(--danger);
+        border-color: rgba(255, 114, 133, 0.32);
+      }
+
+      /* --------------------------------------------------------------- hero */
+
+      .hero {
+        position: relative;
+        padding: 14px;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--line);
+        background:
+          linear-gradient(158deg, rgba(90, 209, 255, 0.105), rgba(104, 118, 255, 0.045) 44%, rgba(255, 255, 255, 0.018)),
+          rgba(10, 15, 22, 0.72);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.07),
+          0 18px 40px -30px rgba(0, 0, 0, 0.9);
+        overflow: hidden;
+        transition: border-color 240ms var(--ease);
+      }
+
+      .hero::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+        background-size: 26px 26px;
+        opacity: 0.22;
+        mask-image: radial-gradient(80% 120% at 85% 0%, #000 0%, transparent 72%);
+        pointer-events: none;
+      }
+
+      body[data-phase="error"] .hero {
+        border-color: rgba(255, 114, 133, 0.3);
+        background:
+          linear-gradient(158deg, rgba(255, 114, 133, 0.12), rgba(120, 40, 60, 0.05) 50%, rgba(255, 255, 255, 0.015)),
+          rgba(14, 12, 16, 0.72);
+      }
+
+      .hero__top {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        min-height: 58px;
+      }
+
+      .art {
+        position: relative;
+        flex: none;
+        width: 56px;
+        height: 56px;
+        display: grid;
+        place-items: center;
+      }
+
+      .art svg {
+        width: 56px;
+        height: 56px;
+        overflow: visible;
+      }
+
+      .art .ring {
+        transform-box: fill-box;
+        transform-origin: center;
+        opacity: 0.5;
+      }
+
+      body[data-phase="live"] .art .ring,
+      body[data-phase="connecting"] .art .ring {
+        animation: ripple 2.6s var(--ease) infinite;
+      }
+
+      body[data-phase="live"] .art .ring-2 {
+        animation-delay: 0.5s;
+      }
+
+      body[data-phase="live"] .art .ring-3 {
+        animation-delay: 1s;
+      }
+
+      body[data-phase="connecting"] .art .ring {
+        animation-duration: 1.15s;
+      }
+
+      body[data-phase="live"] .art .core {
+        fill: var(--success);
+        filter: drop-shadow(0 0 6px rgba(75, 227, 164, 0.8));
+      }
+
+      body[data-phase="error"] .art .ring-1 {
+        stroke: rgba(255, 114, 133, 0.26);
+      }
+
+      body[data-phase="error"] .art .ring-2 {
+        stroke: rgba(255, 114, 133, 0.4);
+      }
+
+      body[data-phase="error"] .art .ring-3 {
+        stroke: rgba(255, 114, 133, 0.58);
+      }
+
+      body[data-phase="error"] .art .core {
+        fill: var(--danger);
+        filter: drop-shadow(0 0 6px rgba(255, 114, 133, 0.75));
+      }
+
+      .hero__copy {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .hero__copy h1 {
+        margin: 0;
+        font-size: 15.5px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+
+      .hero__copy p {
+        margin: 3px 0 0;
+        color: var(--muted);
+        font-size: 11.5px;
+        line-height: 1.45;
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      body[data-phase="error"] .hero__copy p {
+        color: #ff9aa7;
+        white-space: normal;
+      }
+
+      .metrics {
+        position: relative;
+        display: flex;
+        align-items: flex-end;
+        gap: 18px;
+        margin-top: 13px;
+        padding-top: 11px;
+        border-top: 1px solid rgba(255, 255, 255, 0.075);
+      }
+
+      .metrics:empty {
+        display: none;
+      }
+
+      .metric {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        line-height: 1.2;
+      }
+
+      .metric strong {
+        font-size: 13.5px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.01em;
+      }
+
+      .metric span {
+        color: var(--faint);
+        font-size: 9.5px;
+        letter-spacing: 0.06em;
+      }
+
+      .audio-chip {
+        margin-left: auto;
+        align-self: center;
+        padding: 3px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--faint);
+        font-size: 10px;
+        letter-spacing: 0.02em;
+      }
+
+      .audio-chip.is-on {
+        color: var(--success);
+        border-color: rgba(75, 227, 164, 0.26);
+        background: rgba(75, 227, 164, 0.08);
+      }
+
+      /* ----------------------------------------------------------- receiver */
+
+      .receiver {
+        margin-top: 14px;
+        padding: 12px;
+        border: 1px solid var(--line);
+        border-radius: 19px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.022));
+        box-shadow:
+          0 14px 30px -20px rgba(0, 0, 0, 0.9),
+          inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      }
+
+      .receiver__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .receiver__head label,
+      .receiver__title {
+        color: var(--muted);
+        font-size: 11px;
+        letter-spacing: 0.02em;
+      }
+
+      .scan {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 24px;
+        padding: 0 11px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-pill);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--muted);
+        font: inherit;
+        font-size: 10.5px;
+        cursor: pointer;
+        transition:
+          color 180ms var(--ease),
+          border-color 180ms var(--ease),
+          background 180ms var(--ease);
+      }
+
+      .scan:hover:not(:disabled) {
+        color: var(--accent);
+        border-color: rgba(90, 209, 255, 0.4);
+        background: rgba(90, 209, 255, 0.07);
+      }
+
+      .scan:disabled {
+        cursor: default;
+        opacity: 0.6;
+      }
+
+      .scan__dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .scan.is-busy .scan__dot {
+        animation: breathe 900ms var(--ease) infinite;
+      }
+
+      .receivers {
+        display: grid;
+        gap: 6px;
+      }
+
+      .receivers__empty {
+        margin: 0;
+        padding: 9px 11px;
+        border: 1px dashed var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--faint);
+        font-size: 10.5px;
+        line-height: 1.45;
+      }
+
+      .pick {
+        position: relative;
+        display: block;
+        cursor: pointer;
+      }
+
+      .pick input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .pick__card {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 9px 11px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 255, 255, 0.035);
+        transition:
+          border-color 180ms var(--ease),
+          background 180ms var(--ease),
+          box-shadow 180ms var(--ease);
+      }
+
+      .pick:hover .pick__card {
+        border-color: var(--line-strong);
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .pick input:checked + .pick__card {
+        border-color: rgba(90, 209, 255, 0.5);
+        background: rgba(90, 209, 255, 0.09);
+        box-shadow:
+          0 0 0 3px rgba(90, 209, 255, 0.1),
+          inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      }
+
+      .pick input:focus-visible + .pick__card {
+        box-shadow: 0 0 0 3px rgba(90, 209, 255, 0.28);
+      }
+
+      .pick__dot {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--success);
+        box-shadow: 0 0 0 3px rgba(75, 227, 164, 0.14);
+      }
+
+      .pick__copy {
+        display: grid;
+        min-width: 0;
+      }
+
+      .pick__copy strong {
+        overflow: hidden;
+        font-size: 12px;
+        font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .pick__copy span {
+        color: var(--faint);
+        font: 10px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
+      }
+
+      .pick__badge {
+        flex: none;
+        margin-left: auto;
+        padding: 2px 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-pill);
+        color: var(--muted);
+        font-size: 9.5px;
+      }
+
+      .code {
+        display: block;
+        margin-top: 10px;
+      }
+
+      .code__label {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--muted);
+        font-size: 11px;
+        letter-spacing: 0.02em;
+      }
+
+      .code__input {
+        width: 100%;
+        height: 44px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text);
+        font: 600 20px/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
+        letter-spacing: 0.3em;
+        text-align: center;
+        text-indent: 0.3em;
+        outline: none;
+        transition:
+          border-color 180ms var(--ease),
+          box-shadow 180ms var(--ease),
+          background 180ms var(--ease);
+      }
+
+      .code__input::placeholder {
+        color: var(--faint);
+        font-weight: 500;
+      }
+
+      .code__input:hover:not(:disabled) {
+        border-color: var(--line-strong);
+      }
+
+      .code__input:focus {
+        border-color: rgba(90, 209, 255, 0.55);
+        background: rgba(90, 209, 255, 0.05);
+        box-shadow: 0 0 0 3px rgba(90, 209, 255, 0.13);
+      }
+
+      .manual {
+        margin-top: 10px;
+      }
+
+      .manual summary {
+        color: var(--faint);
+        font-size: 10.5px;
+        list-style: none;
+        cursor: pointer;
+      }
+
+      .manual summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .manual summary::before {
+        content: "▸ ";
+      }
+
+      .manual[open] summary::before {
+        content: "▾ ";
+      }
+
+      .manual .field {
+        margin-top: 7px;
+      }
+
+      .field {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+
+      .field__glyph {
+        position: absolute;
+        left: 12px;
+        display: grid;
+        place-items: center;
+        color: var(--faint);
+        pointer-events: none;
+      }
+
+      .field input {
+        width: 100%;
+        height: 38px;
+        padding: 0 12px 0 34px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text);
+        font: 11.5px/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
+        letter-spacing: 0.01em;
+        outline: none;
+        transition:
+          border-color 180ms var(--ease),
+          box-shadow 180ms var(--ease),
+          background 180ms var(--ease);
+      }
+
+      .field input::placeholder {
+        color: var(--faint);
+        font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+        font-size: 11.5px;
+        letter-spacing: 0;
+      }
+
+      .field input:hover:not(:disabled) {
+        border-color: var(--line-strong);
+      }
+
+      .field input:focus {
+        border-color: rgba(90, 209, 255, 0.55);
+        background: rgba(90, 209, 255, 0.05);
+        box-shadow: 0 0 0 3px rgba(90, 209, 255, 0.13);
+      }
+
+      .field input:disabled {
+        color: var(--muted);
+        opacity: 0.7;
+      }
+
+      .receiver__hint {
+        margin: 9px 0 0;
+        color: var(--faint);
+        font-size: 10.5px;
+        line-height: 1.45;
+      }
+
+      /* ------------------------------------------------------------ actions */
+
+      .actions {
+        display: grid;
+        gap: 8px;
+        margin-top: 13px;
+      }
+
+      body[data-phase="live"] .actions,
+      body[data-phase="connecting"] .actions {
+        display: none;
+      }
+
+      body[data-phase="live"] .stop,
+      body[data-phase="connecting"] .stop {
+        margin-top: 13px;
+      }
+
+      .action {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--text);
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          transform 180ms var(--ease),
+          border-color 180ms var(--ease),
+          background 180ms var(--ease),
+          box-shadow 180ms var(--ease);
+      }
+
+      .action:hover:not(:disabled) {
+        transform: translateY(-1px);
+        background: var(--surface-2);
+        border-color: var(--line-strong);
+        box-shadow: 0 10px 24px -18px rgba(0, 0, 0, 0.9);
+      }
+
+      .action:active:not(:disabled) {
+        transform: translateY(0) scale(0.995);
+      }
+
+      .action:focus-visible,
+      .stop:focus-visible {
+        outline: 2px solid rgba(90, 209, 255, 0.7);
+        outline-offset: 2px;
+      }
+
+      .action:disabled {
+        opacity: 0.42;
+        cursor: default;
+      }
+
+      .action--primary {
+        border-color: rgba(90, 209, 255, 0.34);
+        background:
+          linear-gradient(180deg, rgba(90, 209, 255, 0.19), rgba(90, 209, 255, 0.07)),
+          rgba(10, 16, 24, 0.6);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.12),
+          0 14px 30px -24px rgba(90, 209, 255, 0.9);
+      }
+
+      .action--primary:hover:not(:disabled) {
+        border-color: rgba(90, 209, 255, 0.55);
+        background:
+          linear-gradient(180deg, rgba(90, 209, 255, 0.26), rgba(90, 209, 255, 0.1)),
+          rgba(10, 16, 24, 0.6);
+      }
+
+      .action__glyph {
+        display: grid;
+        place-items: center;
+        flex: none;
+        width: 34px;
+        height: 34px;
+        border-radius: 11px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--muted);
+      }
+
+      .action--primary .action__glyph {
+        color: var(--accent);
+        border-color: rgba(90, 209, 255, 0.28);
+        background: rgba(90, 209, 255, 0.12);
+      }
+
+      .action__copy {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        line-height: 1.3;
+      }
+
+      .action__copy strong {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+
+      .action__copy small {
+        color: var(--muted);
+        font-size: 10.5px;
+      }
+
+      .action__arrow {
+        margin-left: auto;
+        color: var(--faint);
+        display: grid;
+        place-items: center;
+        transition: transform 180ms var(--ease), color 180ms var(--ease);
+      }
+
+      .action:hover:not(:disabled) .action__arrow {
+        transform: translateX(2px);
+        color: var(--muted);
+      }
+
+      .stop {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        width: 100%;
+        height: 38px;
+        margin-top: 9px;
+        border-radius: var(--radius-sm);
+        border: 1px solid rgba(255, 114, 133, 0.26);
+        background: rgba(255, 114, 133, 0.07);
+        color: #ff9aa7;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+          background 180ms var(--ease),
+          border-color 180ms var(--ease),
+          color 180ms var(--ease);
+      }
+
+      .stop:hover:not(:disabled) {
+        background: rgba(255, 114, 133, 0.12);
+        border-color: rgba(255, 114, 133, 0.42);
+        color: #ffb4be;
+      }
+
+      .stop[hidden] {
+        display: none;
+      }
+
+      .stop:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      .stop__square {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+        background: currentColor;
+      }
+
+      /* ------------------------------------------------------------- footer */
+
+      .foot {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        margin-top: 12px;
+        color: var(--faint);
+        font-size: 10px;
+        letter-spacing: 0.02em;
+      }
+
+      .foot svg {
+        flex: none;
+        opacity: 0.8;
+      }
+
+      @keyframes breathe {
+        0%,
+        100% {
+          transform: scale(0.82);
+          opacity: 0.65;
+        }
+        50% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      @keyframes ripple {
+        0% {
+          transform: scale(0.86);
+          opacity: 0.5;
+        }
+        70% {
+          transform: scale(1.06);
+          opacity: 0.08;
+        }
+        100% {
+          transform: scale(1.06);
+          opacity: 0.08;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body data-phase="idle">
+    <div class="shell">
+      <header class="bar">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M4 15.5a11 11 0 0 1 16 0"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+              />
+              <path
+                d="M7.4 18.4a6.6 6.6 0 0 1 9.2 0"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+                opacity="0.7"
+              />
+              <circle cx="12" cy="20.6" r="1.35" fill="currentColor" />
+            </svg>
+          </span>
+          <div class="brand__copy">
+            <b>HORIZON</b>
+            <span>投屏</span>
+          </div>
+        </div>
+        <span class="pill" role="status" aria-live="polite">
+          <span class="pill__dot" aria-hidden="true"></span>
+          <span id="state">空闲</span>
+        </span>
+      </header>
+
+      <section class="hero" aria-labelledby="heroTitle">
+        <div class="hero__top">
+          <div class="art" aria-hidden="true">
+            <svg viewBox="0 0 56 56" fill="none">
+              <circle class="ring ring-1" cx="28" cy="28" r="24" stroke="rgba(90,209,255,0.30)" stroke-width="1" />
+              <circle class="ring ring-2" cx="28" cy="28" r="17" stroke="rgba(90,209,255,0.45)" stroke-width="1" />
+              <circle class="ring ring-3" cx="28" cy="28" r="10" stroke="rgba(90,209,255,0.62)" stroke-width="1" />
+              <circle class="core" cx="28" cy="28" r="3.2" fill="#5ad1ff" />
+            </svg>
+          </div>
+          <div class="hero__copy">
+            <h1 id="heroTitle">准备投放</h1>
+            <p id="detail">选择一种投放方式，画面与声音只在局域网内。</p>
+          </div>
+        </div>
+        <div id="stats" class="metrics" aria-live="polite"></div>
+      </section>
+
+      <form id="receiver" class="receiver" autocomplete="off">
+        <div class="receiver__head">
+          <span class="receiver__title">接收端</span>
+          <button id="scan" type="button" class="scan">
+            <span class="scan__dot" aria-hidden="true"></span>
+            <span id="scanLabel">搜索局域网</span>
+          </button>
+        </div>
+
+        <div id="receivers" class="receivers" role="radiogroup" aria-label="发现的接收端"></div>
+        <p id="receiverEmpty" class="receivers__empty" hidden>
+          没有发现接收端。请确认大屏的浏览器投屏已开启，或展开下方手动填写地址。
+        </p>
+
+        <label class="code" for="code">
+          <span class="code__label">投屏码</span>
+          <input
+            id="code"
+            class="code__input"
+            inputmode="numeric"
+            maxlength="6"
+            placeholder="6 位数字"
+            aria-describedby="receiverHint"
+          />
+        </label>
+
+        <details class="manual">
+          <summary>手动填写接收端地址</summary>
+          <div class="field">
+            <span class="field__glyph" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M10 14a4.5 4.5 0 0 0 6.4 0l2.6-2.6a4.5 4.5 0 1 0-6.4-6.4L11.4 6"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M14 10a4.5 4.5 0 0 0-6.4 0l-2.6 2.6a4.5 4.5 0 1 0 6.4 6.4L12.6 18"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </span>
+            <input
+              id="address"
+              spellcheck="false"
+              inputmode="url"
+              placeholder="192.168.0.52:9407 或 ws://…/stream?token=…"
+            />
+          </div>
+        </details>
+
+        <p id="receiverHint" class="receiver__hint">
+          在大屏的「浏览器投屏」卡片上能看到 6 位投屏码，输入后即可投放，无需复制地址。
+        </p>
+      </form>
+
+      <div class="actions">
+        <button id="tab" type="button" class="action action--primary">
+          <span class="action__glyph" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+              <rect x="3.5" y="5" width="17" height="14" rx="2.6" stroke="currentColor" stroke-width="1.6" />
+              <path d="M3.5 9h17" stroke="currentColor" stroke-width="1.6" />
+              <circle cx="6.4" cy="7" r="0.95" fill="currentColor" />
+            </svg>
+          </span>
+          <span class="action__copy">
+            <strong>投放当前标签页</strong>
+            <small>含标签页声音</small>
+          </span>
+          <span class="action__arrow" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+        </button>
+
+        <button id="screen" type="button" class="action">
+          <span class="action__glyph" aria-hidden="true">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="4.5" width="18" height="12.5" rx="2.4" stroke="currentColor" stroke-width="1.6" />
+              <path d="M9 20.5h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              <path d="M12 17v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            </svg>
+          </span>
+          <span class="action__copy">
+            <strong>投放屏幕或窗口</strong>
+            <small>可选择分享系统音频</small>
+          </span>
+          <span class="action__arrow" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+        </button>
+      </div>
+
+      <button id="stop" type="button" class="stop" disabled hidden>
+        <span class="stop__square" aria-hidden="true"></span>
+        停止投屏
+      </button>
+
+      <footer class="foot">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="4.5" y="10" width="15" height="10" rx="2.6" stroke="currentColor" stroke-width="1.6" />
+          <path d="M8 10V7.5a4 4 0 0 1 8 0V10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+        <span>画面与声音只走局域网，不经过云端</span>
+      </footer>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["src-tauri", "crates/horizon-cast"]
+
+# Workspace profiles must live at the root; cargo ignores member-level profiles.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
+
+# The cast engine is latency-critical: it keeps size-optimised packaging for the
+# launcher but gets its own throughput-first codegen.
+[profile.release.package.horizon-cast]
+opt-level = 3
+
+# Iteration profile for the engine's CLI probes: release-grade codegen without
+# fat LTO, so a single-file change relinks in seconds.
+[profile.probe]
+inherits = "release"
+lto = false
+codegen-units = 16
+strip = false
