@@ -57,6 +57,8 @@ printf 'sdk.dir=%s\n' "$PWD/../AndroidSdk" > local.properties   # 路径按实�
 
 - 国内网络如果 `services.gradle.org` 不通，把 `gradle/wrapper/gradle-wrapper.properties` 的
   `distributionUrl` 换成镜像（例如 `https://mirrors.cloud.tencent.com/gradle/gradle-8.9-bin.zip`）。
+  如果 wrapper 仍反复重下发行包，直接用手上的 Gradle 8.9 构建，可以完全跳过 wrapper：
+  `gradle -p android :app:assembleRelease`。
 - **Windows 中文用户名**：Gradle 测试 worker 用 `@argfile` 传 classpath，用户名含中文时
   worker 会因编码问题起不来（`ClassNotFoundException: GradleWorkerMain`）。
   构建/测试时把 `GRADLE_USER_HOME` 指到纯 ASCII 路径即可，例如 `D:\gradle-home`。

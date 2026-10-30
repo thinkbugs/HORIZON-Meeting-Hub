@@ -59,6 +59,7 @@ class VideoEncoder(private val sink: Sink) {
         this.codec = codec
         this.width = width
         this.height = height
+        params = null
         wallBaseUs = System.currentTimeMillis() * 1000
         monoBaseUs = System.nanoTime() / 1000
         running = true

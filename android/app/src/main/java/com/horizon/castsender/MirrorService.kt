@@ -72,6 +72,9 @@ class MirrorService : Service() {
 
     private fun startMirror(intent: Intent) {
         if (projection != null) return
+        // A previous stop may still be tearing down this same instance; the
+        // latch has to be cleared before the writer/stats threads look at it.
+        stopping.set(false)
         val host = intent.getStringExtra(EXTRA_HOST).orEmpty()
         val port = intent.getIntExtra(EXTRA_PORT, Discovery.PORT)
         token = intent.getStringExtra(EXTRA_TOKEN).orEmpty()
