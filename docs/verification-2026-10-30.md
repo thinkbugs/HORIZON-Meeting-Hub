@@ -134,3 +134,38 @@ Windows 11 的截图工具有录屏，Windows 10 没有；Win10 的录屏在 Xbo
 文件传送首次使用时，点击面板里的「放行」并在 UAC 弹窗中确认一次，Windows 防火墙才会为 `horizon-launcher.exe` 建立入站规则；不点这一步，其他电脑访问 `http://<本机IP>:7878` 仍会被系统拦截。规则建立后不再需要任何操作。
 
 如果放行后仍然打不开，那就不是本机的问题了：常见原因是 Wi-Fi 的「AP 隔离 / 访客网络」或路由器 VLAN 把两台设备隔在不同广播域——这类网络里任何两台设备都无法互相直连，需要网络管理员放开。
+
+## 7. 源码发布
+
+远端：<https://github.com/thinkbugs/HORIZON-Meeting-Hub>（公开仓库，默认分支 `main`）。发布建立在远端已有的 `Initial commit`（MIT LICENSE）之上，本地提交 `6884241` 快进推送：`a915940..6884241  main -> main`。
+
+入库范围：256 个文件、34.1 MB——`src/`、`src-tauri/`、`crates/horizon-cast/`、`extension/`、`public/`、`docs/`、根目录界面截图、全部工程配置，外加新增的 `README.md`。
+
+| 项 | 处理 |
+| --- | --- |
+| `node_modules`、`dist`、`target/`、`src-tauri/gen` | 忽略（构建产物） |
+| `.probe/` | 忽略（本机验证脚本，路径绑定本机） |
+| `.qoder/` | 忽略（会话配置） |
+| `oem/` | 忽略（客户定制信息） |
+| `tools/gen_fairplay_tables.cjs` | 写死的本机临时目录改为命令行参数 |
+| 开发用自签名证书/私钥、FairPlay 常量表 | 入库（`include_bytes!` 编译依赖，安装包内本已携带），README 标注仅限本机调试与协议研究 |
+
+链路与认证（逐环节实测，不是推测）：
+
+| 环节 | 实测结果 |
+| --- | --- |
+| `github.com:443` 直连 | 连接重置 / 21 s 超时；同机 `api.github.com` 直连 200，说明是域名级拦截而非断网 |
+| 系统代理 | WinINET `ProxyEnable=1`、`ProxyServer=127.0.0.1:7897`，`curl -x` 访问仓库页 200 |
+| Git 传输 | 仅对本仓库设置 `http(s).proxy`，`git ls-remote origin` 正常返回 `a915940` |
+| 认证 | GCM 设备码登录（`git-credential-manager github login --device`），凭据落入 Windows 凭据管理器；`git credential fill` 返回 `username=thinkbugs` |
+| 推送 | `6884241` 快进推送成功，`main` 已跟踪 `origin/main` |
+
+远端校验（GitHub Git Tree API，`recursive=1`）：
+
+| 项 | 结果 |
+| --- | --- |
+| HEAD | `6884241cf4019329556e09ef264c2a01176f5a96` |
+| 树条目 / blob | 293 / 257（256 个源码文件 + 远端 LICENSE） |
+| 关键文件 | `README.md`、`src/App.tsx`、`src-tauri/src/lib.rs`、`src-tauri/tauri.conf.json`、`crates/horizon-cast/src/airplay/fairplay.rs`、`extension/manifest.json`、`docs/verification-2026-10-30.md`、`docs/shots/file-transfer-firewall-2026-10-30.png` 全部命中 |
+| 忽略项 | `.probe/`、`oem/`、`node_modules/`、`dist/`、`target/`、`.qoder/` 命中 0 条 |
+| 仓库页 | `https://github.com/thinkbugs/HORIZON-Meeting-Hub` HTTP 200 |
