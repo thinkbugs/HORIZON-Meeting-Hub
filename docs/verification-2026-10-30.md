@@ -127,7 +127,7 @@ Windows 11 的截图工具有录屏，Windows 10 没有；Win10 的录屏在 Xbo
 - `cargo test --lib`：10 passed / 0 failed。
 - `npx tauri build` 成功，产物 `target\release\horizon-launcher.exe`（2026-10-30 02:02）与 `bundle\nsis\HORIZON Meeting_0.5.1_x64-setup.exe`（4.35 MiB）。
 
-面板现状截图：[`docs/shots/file-transfer-firewall-2026-10-30.png`](shots/file-transfer-firewall-2026-10-30.png)。
+面板现状截图：`docs/shots/file-transfer-firewall-2026-10-30.png`（已随仓库整理移除，历史提交 `6d701a9` 可查）。
 
 ## 仍需要用户完成的一步
 

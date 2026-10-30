@@ -420,7 +420,7 @@ preview window: paint 36 fps, skip 14, queue max 0, arrival to paint avg 11.0 ms
 
 ### 8.15 本轮量测中撞出的新缺陷：退出全屏后面板没有画面
 
-复现路径（20:2x 构建，Mac 正在镜像）：面板卡片出画 → 点「全屏观看」→ 舞台出画 → 点「退出全屏」。**卡片回到「等待 iPhone、iPad 或 Mac 开始镜像」，而引擎侧仍是「正在镜像」、`镜像帧 10176，关键帧 3`**（截图 [`shots/airplay-card-blank-after-stage.png`](shots/airplay-card-blank-after-stage.png)）。
+复现路径（20:2x 构建，Mac 正在镜像）：面板卡片出画 → 点「全屏观看」→ 舞台出画 → 点「退出全屏」。**卡片回到「等待 iPhone、iPad 或 Mac 开始镜像」，而引擎侧仍是「正在镜像」、`镜像帧 10176，关键帧 3`**（截图 `shots/airplay-card-blank-after-stage.png`）。
 
 原因是两个显示面各自挂一个解码器：`CastPanel` 的卡片是 `<MirrorPreview active={!presenting}>`（`src/components/CastPanel.tsx:776`、`:921`），舞台是另一个实例（`src/components/CastStage.tsx:20`）。全屏时卡片 `active` 转 false，管线整个拆掉；退出时重新 `attach()`，而 `attach()` 之前那次会话的开场 IDR 早已用掉——`join` 回放缓冲上限 120 帧（有画面变化时约 2–4 秒）就会整段清空（`src-tauri/src/receivers.rs:216`），于是新挂载的解码器只能等一个不会来的关键帧。这和 8.10「晚挂载必须靠回放」是同一枚硬币的另一面：回放救得了「会话开始后几秒内挂载」，救不了「会话中途换面」。
 
@@ -439,7 +439,7 @@ preview window: paint 36 fps, skip 14, queue max 0, arrival to paint avg 11.0 ms
 - `MirrorSurface`（`src/components/MirrorPreview.tsx:657`）退化成一个纯宿主盒子：卡片用它（`CastPanel.tsx:854`、`:1004`）、全屏舞台用它（`src/components/CastStage.tsx:43`）。谁成为宿主，画布就被**命令式搬过去**（`host.insertBefore(canvas, host.firstChild)`，`MirrorPreview.tsx:85-91`），DOM 节点不变 → WebCodecs 解码器与已喂进去的开场 IDR 都不变。
 - 于是 8.15 的前提消失：退出全屏不再有「新挂载的解码器等一个不会来的关键帧」这一步，回放缓冲（`src-tauri/src/receivers.rs:216`）只服务它本来的场景（会话开始后几秒内挂载）。
 
-实机验证（21:05 构建，Mac 正在镜像 1920×1080）：卡片出画 → 点「全屏观看」舞台出画 → 点「退出全屏」，卡片**继续显示 Mac 实时画面**，顶栏仍是「正在镜像 · 1920×1080 · 已配对」，面板读数 `镜像帧 3583，关键帧 1`、上屏 40 帧/秒、到达到绘制 9 ms（峰值 19 ms）（截图 [`shots/airplay-card-after-stage-fixed.png`](shots/airplay-card-after-stage-fixed.png)）。**整场会话只有 1 个关键帧而卡片换了面依然有画**，正是这条修复要证明的那件事。
+实机验证（21:05 构建，Mac 正在镜像 1920×1080）：卡片出画 → 点「全屏观看」舞台出画 → 点「退出全屏」，卡片**继续显示 Mac 实时画面**，顶栏仍是「正在镜像 · 1920×1080 · 已配对」，面板读数 `镜像帧 3583，关键帧 1`、上屏 40 帧/秒、到达到绘制 9 ms（峰值 19 ms）（截图 `shots/airplay-card-after-stage-fixed.png`）。**整场会话只有 1 个关键帧而卡片换了面依然有画**，正是这条修复要证明的那件事。
 
 同一改动在浏览器扩展源上给出可重复（不需要 Mac）的断言，最终构建（22:39）经 CDP 读回：进入全屏 `sameCanvas: true`、退出后 `canvasBackInPanel: true` 且 `sameCanvasAfter: true`——两块面之间往返的是同一个 canvas 节点。
 
@@ -638,7 +638,7 @@ preview window: paint 36 fps, skip 14, queue max 0, arrival to paint avg 11.0 ms
 
 ## 截图
 
-> 本节引用的根目录 `verify*.png`、`screenshot*.png` 已从仓库移除（历史提交 `6884241` 仍可查看）；`shots/` 下的截图保留。
+> 本节引用的根目录 `verify*.png`、`screenshot*.png` 与 `shots/` 下的截图均已从仓库移除（历史提交 `6884241`、`6d701a9` 仍可查看）。
 
 - `verify1.png`：首页（最终构建）- `verify2.png`：设置抽屉「批注应用」章节
 - `verify4.png`：办公应用面板（旧版，点击即启动）
@@ -647,22 +647,22 @@ preview window: paint 36 fps, skip 14, queue max 0, arrival to paint avg 11.0 ms
 - 8.10 的镜像画面未导出为文件，证据以窗口内可读文本记录：面板「镜像帧 1273，关键帧 1」与舞台顶栏「正在接收 · AirPlay 镜像 1920×1080 · 已配对」，舞台画布内容为 Mac 桌面本身。
 - `verify7.png`：点击 Office 直启默认应用（toast，无面板）
 - `verify8.png`：修复后的首页与侧边栏（7 个工具可点）
-- [`shots/airplay-receiver-on.png`](shots/airplay-receiver-on.png)：AirPlay 接收已开启，广播名与监听地址（第 7 节）
-- [`shots/airplay-stage-20-2x.png`](shots/airplay-stage-20-2x.png)：20:2x 构建的全屏舞台，Mac 镜像 1920×1080 实机画面（Safari 打开 `ishohealth.com`，正文与小字边缘清晰，顶栏「正在接收 · AirPlay 镜像 1920×1080 · 已配对」）
-- [`shots/airplay-drawer-streaming.png`](shots/airplay-drawer-streaming.png)：`is-streaming` 挂上时抽屉的观感——遮罩由毛玻璃退成纯色，卡片、文字与配色不变
-- [`shots/airplay-card-blank-after-stage.png`](shots/airplay-card-blank-after-stage.png)：8.15 缺陷证据——引擎侧「正在镜像 · 1920×1080 · 已配对」，卡片却停在「等待 iPhone、iPad 或 Mac 开始镜像」
-- [`shots/airplay-card-after-stage-fixed.png`](shots/airplay-card-after-stage-fixed.png)：8.16 修复后——退出全屏卡片继续出画（Mac 上的网页清晰可读），面板「正在镜像 · 1920×1080 · 已配对 · 镜像帧 3583，关键帧 1」
-- [`shots/card-code-22-30.png`](shots/card-code-22-30.png)：9.1 卡片预览窗的 6 位投屏码字卡（「投屏码 / 5 1 8 2 9 4 / 在浏览器扩展里输入这 6 位数字」），修前从数字缝里透出来的那条提示已消失
-- [`shots/stage-code-2026-10-29.png`](shots/stage-code-2026-10-29.png)：9.1 全屏舞台的投屏码（补上 `.cast-stage__code` 排版前的样子，数字与舞台自带提示叠在一起）
-- [`shots/stage-code-final.png`](shots/stage-code-final.png)：9.1 最终构建的全屏舞台——152px 数字居中、顶部光晕、顶栏「等待投放 · 浏览器投屏 · 局域网直连」，预览盒那条「等待…」提示已被压掉
-- [`shots/ext-stub-idle.png`](shots/ext-stub-idle.png)：9.4 扩展 popup 待命态（shipped `popup.html`/`popup.js` 跑在真浏览器里、只桩 `chrome.*`），圆角与接收端列表
-- [`shots/ext-stub-live.png`](shots/ext-stub-live.png)：9.4 扫描进行中的 popup——已发现的接收端边扫边出现，投屏码输入框与「已选」状态
-- [`shots/ext-stub-idle-allow.png`](shots/ext-stub-idle-allow.png)：10.5 待命态——worker 扫完写进缓存的 2 台接收端、已选中 WLAN、徽章「需要投屏码」、圆角未退化
-- [`shots/ext-stub-live-allow.png`](shots/ext-stub-live-allow.png)：10.5 输码后的 popup（「已选 戎耀会，投屏码 504282。」）
-- [`shots/ext-stub-idle-block.png`](shots/ext-stub-idle-block.png) / [`shots/ext-stub-live-block.png`](shots/ext-stub-live-block.png)：10.1 那轮对照——本地网络访问检查**开着**时的同一界面，用作「本机复现不了拦截」的证据图
-- [`shots/welcome-snapshot.png`](shots/welcome-snapshot.png)：11.4 主题设置抽屉——用户自己那张 1672×941 的欢迎图 + 本轮加进去的 2 张测试图（缩略图 3）、背景音乐 2 首逐行列出，标签全中文
-- [`shots/welcome-persisted-stage.png`](shots/welcome-persisted-stage.png)：11.4 跨进程重启后满屏出画的欢迎图（顶栏齿轮/退出、底栏「欢迎 · 1 / 1」与播放控制）——「关闭后就恢复」已不成立
-- [`shots/welcome-editor-restored.png`](shots/welcome-editor-restored.png)：11.5 清理测试数据后的编辑器（图片 1 / 背景音乐 0 / 间隔 10 秒），与用户原状一致
-- [`shots/welcome-after-split.png`](shots/welcome-after-split.png)：11.6 媒体旁置后重启的欢迎界面——图与歌都从 `media:` 引用回填后正常出画/续播（用户自己的欢迎主视觉，1672×941 满屏）
+- `shots/airplay-receiver-on.png`：AirPlay 接收已开启，广播名与监听地址（第 7 节）
+- `shots/airplay-stage-20-2x.png`：20:2x 构建的全屏舞台，Mac 镜像 1920×1080 实机画面（Safari 打开 `ishohealth.com`，正文与小字边缘清晰，顶栏「正在接收 · AirPlay 镜像 1920×1080 · 已配对」）
+- `shots/airplay-drawer-streaming.png`：`is-streaming` 挂上时抽屉的观感——遮罩由毛玻璃退成纯色，卡片、文字与配色不变
+- `shots/airplay-card-blank-after-stage.png`：8.15 缺陷证据——引擎侧「正在镜像 · 1920×1080 · 已配对」，卡片却停在「等待 iPhone、iPad 或 Mac 开始镜像」
+- `shots/airplay-card-after-stage-fixed.png`：8.16 修复后——退出全屏卡片继续出画（Mac 上的网页清晰可读），面板「正在镜像 · 1920×1080 · 已配对 · 镜像帧 3583，关键帧 1」
+- `shots/card-code-22-30.png`：9.1 卡片预览窗的 6 位投屏码字卡（「投屏码 / 5 1 8 2 9 4 / 在浏览器扩展里输入这 6 位数字」），修前从数字缝里透出来的那条提示已消失
+- `shots/stage-code-2026-10-29.png`：9.1 全屏舞台的投屏码（补上 `.cast-stage__code` 排版前的样子，数字与舞台自带提示叠在一起）
+- `shots/stage-code-final.png`：9.1 最终构建的全屏舞台——152px 数字居中、顶部光晕、顶栏「等待投放 · 浏览器投屏 · 局域网直连」，预览盒那条「等待…」提示已被压掉
+- `shots/ext-stub-idle.png`：9.4 扩展 popup 待命态（shipped `popup.html`/`popup.js` 跑在真浏览器里、只桩 `chrome.*`），圆角与接收端列表
+- `shots/ext-stub-live.png`：9.4 扫描进行中的 popup——已发现的接收端边扫边出现，投屏码输入框与「已选」状态
+- `shots/ext-stub-idle-allow.png`：10.5 待命态——worker 扫完写进缓存的 2 台接收端、已选中 WLAN、徽章「需要投屏码」、圆角未退化
+- `shots/ext-stub-live-allow.png`：10.5 输码后的 popup（「已选 戎耀会，投屏码 504282。」）
+- `shots/ext-stub-idle-block.png` / `shots/ext-stub-live-block.png`：10.1 那轮对照——本地网络访问检查**开着**时的同一界面，用作「本机复现不了拦截」的证据图
+- `shots/welcome-snapshot.png`：11.4 主题设置抽屉——用户自己那张 1672×941 的欢迎图 + 本轮加进去的 2 张测试图（缩略图 3）、背景音乐 2 首逐行列出，标签全中文
+- `shots/welcome-persisted-stage.png`：11.4 跨进程重启后满屏出画的欢迎图（顶栏齿轮/退出、底栏「欢迎 · 1 / 1」与播放控制）——「关闭后就恢复」已不成立
+- `shots/welcome-editor-restored.png`：11.5 清理测试数据后的编辑器（图片 1 / 背景音乐 0 / 间隔 10 秒），与用户原状一致
+- `shots/welcome-after-split.png`：11.6 媒体旁置后重启的欢迎界面——图与歌都从 `media:` 引用回填后正常出画/续播（用户自己的欢迎主视觉，1672×941 满屏）
 
 
