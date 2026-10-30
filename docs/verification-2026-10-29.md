@@ -638,6 +638,8 @@ preview window: paint 36 fps, skip 14, queue max 0, arrival to paint avg 11.0 ms
 
 ## 截图
 
+> 本节引用的根目录 `verify*.png`、`screenshot*.png` 已从仓库移除（历史提交 `6884241` 仍可查看）；`shots/` 下的截图保留。
+
 - `verify1.png`：首页（最终构建）- `verify2.png`：设置抽屉「批注应用」章节
 - `verify4.png`：办公应用面板（旧版，点击即启动）
 - `verify5.png`：未设置默认时的首次选择面板（行内「设为默认」）
