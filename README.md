@@ -1,6 +1,6 @@
-# HORIZON 会议中枢
+# HORIZON 开源会议白板启动器
 
-面向会议大屏的 Windows 启动器：一个可自定义的入口面板，加上投屏接收/发送、文件传送、白板批注等会议现场能力。前端 React 19 + TypeScript，外壳 Tauri 2，投屏引擎是独立的 Rust crate。
+面向windows的开源会议大屏的 Windows 启动器：一个可自定义的入口面板，加上投屏接收/发送、文件传送、白板批注等会议现场能力。
 
 ## 功能
 
@@ -13,16 +13,12 @@
 - 开机启动（HKCU Run）、应用内一键放行 Windows 防火墙
 
 **投屏**
-- AirPlay 接收：RAOP 音频 + 视频镜像，自建 FairPlay 解密与 RTSP 会话
-- Chromecast 发送、DLNA DMR 接收
-- 浏览器扩展投屏：Chrome/Edge MV3 扩展抓取标签页或屏幕，WebCodecs 编 H.264，局域网直连接收端
-- 投屏码：大屏显示 6 位码，扩展输入即投，无需配对
+- AirPlay 接收：RAOP 音频 + 视频镜像
+- 浏览器扩展投屏：Chrome/Edge MV3 扩展抓取标签页或屏幕，WebCodecs 编 H.264，局域网直连接收端(投屏码：大屏显示 6 位码，扩展输入即投，无需配对)
 - Miracast 走系统「投影」入口
 
 **文件传送**
 - 内置 SnapDrop 服务（自托管，默认端口 7878）：局域网任意设备打开地址即可互传，带二维码
-- 设备名、存储目录、端口可在面板内修改并持久化
-- 满速传输带进度与完成回调，配置存 `%APPDATA%/horizon-launcher/snapdrop-config.json`
 
 ## 技术栈
 
@@ -41,31 +37,22 @@
 - WebView2 Runtime（Win11 自带）
 
 ## 开发与构建
-
 ```bash
 npm install            # 安装前端依赖
 npm run desktop        # 开发模式（Vite + Tauri，热更新）
 npm run desktop:build  # 发布构建：生成 exe 与 NSIS 安装包
 ```
 
-产物：
-
-- `src-tauri/target/release/horizon-launcher.exe`
-- `src-tauri/target/release/bundle/nsis/HORIZON Meeting_<version>_x64-setup.exe`
-
 单独跑引擎测试：
-
 ```bash
 cargo test -p horizon-cast
 cargo test -p horizon-launcher
 ```
 
 ## 浏览器扩展
-
 `extension/` 即完整的 MV3 扩展。Chrome/Edge 打开 `chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选择该目录。扩展会扫描局域网内的接收端（`/info` 探针），也可手动输入大屏投屏码。
 
 ## 目录结构
-
 ```
 src/                  React 前端（启动器、面板、投屏 UI、设置）
 src-tauri/            Tauri 外壳：窗口、命令、托盘、SnapDrop 服务、防火墙、开机启动
@@ -98,11 +85,9 @@ docs/                 架构说明与验证记录
 局域网首次使用需在 Windows 防火墙放行入站规则，应用内提供一键放行（一次 UAC）。
 
 ## 说明
-
 - `crates/horizon-cast/assets/` 下的证书与私钥仅用于本机开发调试（自签名，绑定 localhost/局域网地址），不要用于生产环境。
 - `resources/fairplay/` 中的常量表来自公开的 AirPlay 互操作实现，仅供协议研究与个人使用；FairPlay 相关权利归 Apple。
 - 本项目为会议现场自用工具，未做多租户与公网暴露场景的安全加固，请勿将文件传送端口直接暴露到公网。
 
 ## 许可
-
 MIT，见 [LICENSE](LICENSE)。
