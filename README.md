@@ -26,6 +26,7 @@
 - AirPlay投屏（接收）：RAOP 音频 + 视频镜像
 - 浏览器扩展投屏：Chrome/Edge MV3 扩展抓取标签页或屏幕，WebCodecs 编 H.264，局域网直连接收端(投屏码：大屏显示 6 位码，扩展输入即投，无需配对)
 - Miracast投屏：走系统「投影」入口
+- 注：edge浏览器扩展（chrome暂未上传）下载：[下载安装](https://microsoftedge.microsoft.com/addons/detail/horizon-%E6%8A%95%E5%B1%8F/kklnnijeceidbhndooefgmkbfiiiopcm)
 
 **文件传送**
 - 内置 SnapDrop 服务（自托管，默认端口 7878）：局域网任意设备打开地址即可互传，带二维码
