@@ -24,6 +24,7 @@ import {
   pickApplications,
   receiverStatus,
   saveState,
+  startSnapdropServer,
   windowControl,
 } from "./lib/bridge";
 import {
@@ -34,6 +35,7 @@ import {
   SIDEBAR_BUILTINS,
 } from "./lib/state";
 import { suppressNativeContextMenu } from "./lib/contextMenu";
+import { isTypingTarget } from "./lib/dom";
 import {
   MAX_PINNED,
   type AppEntry,
@@ -86,6 +88,7 @@ export default function App() {
   const castAutoReady = useRef(false);
   const stageWasLive = useRef({ airplay: false, browser: false });
   const receiverSignature = useRef("");
+  const dlnaUri = useRef<string | null>(null);
   const enteredStageFullscreen = useRef(false);
 
   const pinnedEntries = useMemo(() => state.entries.filter((entry) => entry.pinned), [state.entries]);
@@ -150,6 +153,11 @@ export default function App() {
   }, [hydrated]);
 
   useEffect(() => suppressNativeContextMenu(), []);
+
+  // Auto-start the media library hub so the browser extension always finds it.
+  useEffect(() => {
+    startSnapdropServer(7878).catch(() => undefined);
+  }, []);
 
   // The sidebar is rendered inline. A second WebView2 window cannot be created
   // reliably on this system (0x8007139F), and retrying made the UI flash.
@@ -264,6 +272,14 @@ export default function App() {
       setCastStage(null);
     }
   }, [castStage, receiver]);
+
+  // A DLNA cast has no window of its own: the picture is placed inside the
+  // stage, so a new item has to bring the stage up or the operator sees black.
+  useEffect(() => {
+    const uri = receiver?.dlna?.uri ?? null;
+    if (uri && uri !== dlnaUri.current) setDlnaStageOpen(true);
+    dlnaUri.current = uri;
+  }, [receiver]);
 
   useEffect(() => {
     const goOnline = () => setOnline(true);
@@ -772,10 +788,7 @@ export default function App() {
       )}
 
       {dlnaStageOpen && receiver?.dlna && (
-        <DlnaStage
-          status={receiver.dlna}
-          onClose={() => setDlnaStageOpen(false)}
-        />
+        <DlnaStage status={receiver.dlna} onClose={() => setDlnaStageOpen(false)} />
       )}
 
       {editing && (
@@ -863,11 +876,6 @@ export default function App() {
       )}
     </div>
   );
-}
-
-function isTypingTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
 function displayError(reason: unknown) {

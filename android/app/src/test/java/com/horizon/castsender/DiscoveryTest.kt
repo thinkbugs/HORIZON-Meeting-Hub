@@ -84,6 +84,22 @@ class DiscoveryTest {
         val receiver = Discovery.probe("127.0.0.1", port)
         assertEquals("HORIZON 接收端", receiver?.name)
         assertTrue(receiver!!.legacy)
+        assertNull("a legacy receiver advertises no hub", receiver.hub)
+    }
+
+    @Test
+    fun identifiedReceiverReportsTheHubPortItAdvertises() {
+        serve(
+            "200 OK",
+            """{"service":"horizon-browser","name":"会议室大屏","port":9407,"hub":7878,"paired":false}""",
+        )
+        assertEquals(7878, Discovery.probe("127.0.0.1", port)?.hub)
+    }
+
+    @Test
+    fun receiverWithoutHubFieldLeavesTheLibraryUnknown() {
+        serve("200 OK", """{"service":"horizon-browser","name":"旧版接收端","port":9407}""")
+        assertNull(Discovery.probe("127.0.0.1", port)?.hub)
     }
 
     @Test

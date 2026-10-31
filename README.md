@@ -25,7 +25,8 @@
 **投屏**
 - AirPlay投屏（接收）：RAOP 音频 + 视频镜像
 - 浏览器扩展投屏：Chrome/Edge MV3 扩展抓取标签页或屏幕，WebCodecs 编 H.264，局域网直连接收端(投屏码：大屏显示 6 位码，扩展输入即投，无需配对)
-- Miracast投屏：走系统「投影」入口
+- 媒体投屏：照片、视频、音乐进大屏片库后排队播放；扩展、安卓发送端和大屏自己的面板改的是同一条队列，支持多选投放、排序、预排、跳转与播放控制
+- Miracast 走系统「投影」入口
 - 注：edge浏览器扩展（chrome暂未上传）下载：[下载安装](https://microsoftedge.microsoft.com/addons/detail/horizon-%E6%8A%95%E5%B1%8F/kklnnijeceidbhndooefgmkbfiiiopcm)
 
 **文件传送**
@@ -33,6 +34,7 @@
 
 **Android 发送端**
 - `android/` 是浏览器扩展投屏协议的 Android 实现：MediaProjection + MediaCodec(H.264) 直接投到 9407 接收端，大屏侧无需改动，凭 6 位投屏码接入
+- 媒体页同样接上大屏片库与播放队列：多选上传、排序、跳转、暂停/停止；主机端口取自接收端 `/info`，不写死
 - 构建、安装与真机说明见 [android/README.md](android/README.md)，本轮验证记录见 [docs/verification-2026-10-30-android.md](docs/verification-2026-10-30-android.md)
 
 ## 技术栈
@@ -67,6 +69,8 @@ cargo test -p horizon-launcher
 ## 浏览器扩展
 `extension/` 即完整的 MV3 扩展。Chrome/Edge 打开 `chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选择该目录。扩展会扫描局域网内的接收端（`/info` 探针），也可手动输入大屏投屏码。
 
+弹窗分三个分页：**投屏**（标签页/屏幕镜像）、**文件**（多选文件落到接收目录）、**片库**（上传到主机片库、管理播放队列）。片库/文件走 7878，端口从 `/info` 的 `hub` 字段取得；接口与会话行为见 [docs/browser-cast.md](docs/browser-cast.md)。
+
 ## 目录结构
 ```
 src/                  React 前端（启动器、面板、投屏 UI、设置）
@@ -87,13 +91,15 @@ docs/                 架构说明与验证记录
 | 启动器配置 | `%APPDATA%/com.horizon.meeting/launcher-state.json` |
 | 文件传送配置 | `%APPDATA%/horizon-launcher/snapdrop-config.json` |
 | 接收的文件 | 面板中设置（默认系统下载目录） |
+| 片库（要播放的媒体） | `%APPDATA%/horizon-launcher/media`（可用 `HORIZON_MEDIA_LIBRARY` 覆盖） |
 
 ## 端口
 
 | 用途 | 端口 |
 | --- | --- |
-| 文件传送（SnapDrop） | 7878（可改） |
-| 浏览器扩展投屏 | 9407 |
+| 主机门户：文件传送 + 片库 + 媒体文件（SnapDrop，可改） | 7878 |
+| 浏览器扩展/安卓投屏接收 | 9407 |
+| DLNA 媒体渲染器（`/dd.xml`） | 8290 |
 | CASTV2 | 8009 |
 | mDNS / SSDP 发现 | 5353 / 1900 |
 

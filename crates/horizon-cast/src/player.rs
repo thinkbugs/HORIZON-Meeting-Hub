@@ -49,9 +49,11 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, KillTimer,
-    LoadCursorW, PostMessageW, RegisterClassW, SetTimer, ShowWindow, TranslateMessage, CS_HREDRAW,
-    CS_VREDRAW, CW_USEDEFAULT, IDC_ARROW, MSG, SW_HIDE, SW_SHOW, WINDOW_EX_STYLE, WM_APP,
-    WM_CLOSE, WM_DESTROY, WM_TIMER, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+    LoadCursorW, PostMessageW, RegisterClassW, SetTimer, SetWindowPos, ShowWindow,
+    TranslateMessage, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HWND_TOP, IDC_ARROW, MSG, SW_HIDE,
+    SW_SHOW, SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_DESTROY,
+    WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_NOACTIVATE, WS_EX_TRANSPARENT,
+    WS_OVERLAPPEDWINDOW,
 };
 
 use crate::codec;
@@ -115,6 +117,33 @@ pub trait Transport: Send + Sync {
     fn set_volume(&self, volume: f64) -> CastResult<()>;
     fn set_mute(&self, muted: bool) -> CastResult<()>;
     fn state(&self) -> PlaybackState;
+    /// Stages a second source that starts when the current one ends — DLNA's
+    /// `SetNextAVTransportURI`. A bare player has nowhere to put it, so the
+    /// default declines; only a queue behind the transport can accept one.
+    fn set_next(&self, _uri: &str) -> CastResult<()> {
+        Err(CastError::Unsupported("no playlist to hold a next source"))
+    }
+    fn next(&self) -> CastResult<()> {
+        Err(CastError::Unsupported("no playlist to advance"))
+    }
+    fn previous(&self) -> CastResult<()> {
+        Err(CastError::Unsupported("no playlist to step back"))
+    }
+    fn has_next(&self) -> bool {
+        false
+    }
+    /// The item a controller should see named in `TrackMetaData`. The default
+    /// reads it off the current URI, which is all a bare player knows; a queue
+    /// overrides it with the title and kind its library stored.
+    fn current(&self) -> Option<crate::queue::Track> {
+        self.state().uri.as_deref().map(crate::queue::Track::from_uri)
+    }
+    /// Places the video surface at a client-relative rectangle, or hides it.
+    /// Only surfaces embedded in another window care; a standalone player
+    /// (the `dlna-probe` CLI) keeps its own window and ignores this.
+    fn present(&self, _rect: Option<(i32, i32, i32, i32)>) -> CastResult<()> {
+        Ok(())
+    }
 }
 
 enum Command {
@@ -125,7 +154,97 @@ enum Command {
     Seek(f64),
     Volume(f64),
     Mute(bool),
+    Present(Option<(i32, i32, i32, i32)>),
     Quit,
+}
+
+/// Photo formats a DLNA controller may push. `IMFMediaEngine` only plays timed
+/// media — a JPEG comes back as MF_MEDIA_ENGINE_ERR_SRC_NOT_SUPPORTED (error 4)
+/// and leaves the transport in an error state — so stills are reported as a
+/// source the UI draws itself.
+fn is_still_image(uri: &str) -> bool {
+    let lower = uri.to_ascii_lowercase();
+    let path = lower.split(['?', '#']).next().unwrap_or(&lower);
+    [
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif", ".avif",
+    ]
+    .iter()
+    .any(|ext| path.ends_with(ext))
+}
+
+/// Places the video surface inside the stage rectangle the launcher reported.
+/// MediaEngine stretches the picture to its window, so the surface itself is
+/// shrunk to the video's aspect ratio and centred — otherwise a 16:9 film
+/// cast onto a tall stage shows up distorted.
+fn place_surface(
+    hwnd: HWND,
+    engine: &IMFMediaEngine,
+    place: Option<(i32, i32, i32, i32)>,
+    applied: &mut Option<(i32, i32, i32, i32)>,
+) {
+    let Some((x, y, width, height)) = place else {
+        if applied.is_some() {
+            // SAFETY: the caller owns this HWND for as long as it holds the pump.
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+            *applied = None;
+        }
+        return;
+    };
+    if width <= 0 || height <= 0 {
+        return;
+    }
+    let mut video_width = 0u32;
+    let mut video_height = 0u32;
+    // SAFETY: both out-params are live for the duration of the call.
+    unsafe {
+        let _ = engine.GetNativeVideoSize(Some(&mut video_width), Some(&mut video_height));
+    }
+    let target = if video_width > 0 && video_height > 0 {
+        let aspect = f64::from(video_width) / f64::from(video_height);
+        let mut w = f64::from(width);
+        let mut h = w / aspect;
+        if h > f64::from(height) {
+            h = f64::from(height);
+            w = h * aspect;
+        }
+        (
+            x + ((f64::from(width) - w) / 2.0).round() as i32,
+            y + ((f64::from(height) - h) / 2.0).round() as i32,
+            w.round() as i32,
+            h.round() as i32,
+        )
+    } else {
+        // Without the header there is no aspect to fit to, and filling the
+        // stage would stretch the picture. Stay hidden until the engine
+        // reports a size; the pump retries every tick.
+        if applied.is_some() {
+            // SAFETY: the caller owns this HWND for as long as it holds the pump.
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+            *applied = None;
+        }
+        return;
+    };
+    if *applied == Some(target) {
+        return;
+    }
+    // SAFETY: the HWND belongs to this thread's player and the rectangle is
+    // already clamped to positive size.
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOP),
+            target.0,
+            target.1,
+            target.2,
+            target.3,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+    }
+    *applied = Some(target);
 }
 
 /// `CreateInstance` refuses an attribute store without a callback, even though
@@ -155,13 +274,21 @@ impl MediaEngineTransport {
     /// engine exist. `show_video` only decides whether the window is shown when a
     /// source is loaded; audio plays either way.
     pub fn start(show_video: bool) -> CastResult<Self> {
+        Self::start_with(show_video, None)
+    }
+
+    /// Same, but with the video surface created as a child of `parent` (a raw
+    /// HWND). The launcher embeds the surface in its own window so the DLNA
+    /// picture is part of the stage instead of a separate top-level window that
+    /// the fullscreen launcher covers.
+    pub fn start_with(show_video: bool, parent: Option<isize>) -> CastResult<Self> {
         let (tx, rx) = channel();
         let (ready_tx, ready_rx) = channel();
         let state = Arc::new(Mutex::new(PlaybackState::default()));
         let thread_state = Arc::clone(&state);
         let thread = std::thread::Builder::new()
             .name("horizon-player".into())
-            .spawn(move || player_thread(show_video, rx, thread_state, ready_tx))
+            .spawn(move || player_thread(show_video, parent, rx, thread_state, ready_tx))
             .map_err(|_| CastError::Io)?;
         let hwnd = match ready_rx.recv_timeout(Duration::from_secs(10)) {
             Ok(Ok(hwnd)) => hwnd,
@@ -177,6 +304,20 @@ impl MediaEngineTransport {
             state,
             thread: Some(thread),
         })
+    }
+
+    /// Volume and mute are the two commands whose effect the caller can only see
+    /// through `state()`, and `send` is a post, not an ack: a status read right
+    /// after `set_volume` would still carry the old number. Recording the request
+    /// here makes the write readable at once; the player thread confirms the same
+    /// values when it processes the message, so the two never disagree.
+    fn record(&self, volume: f64, muted: bool) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.volume = volume;
+        state.muted = muted;
     }
 
     fn send(&self, command: Command) -> CastResult<()> {
@@ -223,10 +364,13 @@ impl Transport for MediaEngineTransport {
         if !volume.is_finite() {
             return Err(CastError::Unsupported("volume is not a number"));
         }
-        self.send(Command::Volume(volume.clamp(0.0, 1.0)))
+        let volume = volume.clamp(0.0, 1.0);
+        self.record(volume, self.state().muted);
+        self.send(Command::Volume(volume))
     }
 
     fn set_mute(&self, muted: bool) -> CastResult<()> {
+        self.record(self.state().volume, muted);
         self.send(Command::Mute(muted))
     }
 
@@ -235,6 +379,10 @@ impl Transport for MediaEngineTransport {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
+    }
+
+    fn present(&self, rect: Option<(i32, i32, i32, i32)>) -> CastResult<()> {
+        self.send(Command::Present(rect))
     }
 }
 
@@ -257,6 +405,7 @@ impl Drop for MediaEngineTransport {
 
 fn player_thread(
     show_video: bool,
+    parent: Option<isize>,
     rx: Receiver<Command>,
     state: Arc<Mutex<PlaybackState>>,
     ready: Sender<CastResult<isize>>,
@@ -276,7 +425,7 @@ fn player_thread(
             }
             return;
         }
-        if let Err(e) = pump(show_video, rx, state, &ready) {
+        if let Err(e) = pump(show_video, parent, rx, state, &ready) {
             let _ = ready.send(Err(e));
         }
         if hr.is_ok() {
@@ -298,6 +447,7 @@ enum Intent {
 
 fn pump(
     show_video: bool,
+    parent: Option<isize>,
     rx: Receiver<Command>,
     shared: Arc<Mutex<PlaybackState>>,
     ready: &Sender<CastResult<isize>>,
@@ -319,20 +469,45 @@ fn pump(
         RegisterClassW(&wndclass);
 
         let title = HSTRING::from("HORIZON Cast Receiver");
+        // Embedded: a borderless child of the launcher's window, invisible to
+        // hit-testing and activation so the stage keeps its keyboard and the
+        // video never steals focus. Standalone (CLI probes): the old top-level
+        // window.
+        let (ex_style, style, parent_hwnd, x, y, width, height) = match parent {
+            Some(parent) => (
+                WS_EX_TRANSPARENT | WS_EX_NOACTIVATE,
+                WS_CHILD | WS_CLIPSIBLINGS,
+                Some(HWND(parent as *mut _)),
+                0,
+                0,
+                0,
+                0,
+            ),
+            None => (
+                WINDOW_EX_STYLE(0),
+                WS_OVERLAPPEDWINDOW,
+                None,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                960,
+                540,
+            ),
+        };
         let hwnd = CreateWindowExW(
-            WINDOW_EX_STYLE(0),
+            ex_style,
             &class,
             &title,
-            WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            960,
-            540,
-            None,
+            style,
+            x,
+            y,
+            width,
+            height,
+            parent_hwnd,
             None,
             Some(instance),
             None,
         )?;
+        let embedded = parent.is_some();
 
         let mut attrs: Option<IMFAttributes> = None;
         if let Err(e) = MFCreateAttributes(&mut attrs, 2) {
@@ -378,12 +553,15 @@ fn pump(
 
         let mut intent = Intent::Idle;
         let mut uri: Option<String> = None;
+        let mut still: Option<String> = None;
         let mut position = 0.0f64;
         let mut duration = 0.0f64;
         let mut volume = 0.5f64;
         let mut muted = false;
         let mut problem: Option<String> = None;
         let mut quit = false;
+        let mut place: Option<(i32, i32, i32, i32)> = None;
+        let mut applied: Option<(i32, i32, i32, i32)> = None;
 
         let mut msg = MSG::default();
         while !quit {
@@ -403,32 +581,52 @@ fn pump(
                         problem = None;
                         position = 0.0;
                         duration = 0.0;
-                        if let Err(e) = engine.SetSource(&BSTR::from(source.as_str())) {
+                        if is_still_image(&source) {
+                            // Keep MediaEngine away from the photo: it would set
+                            // error 4 and strand the transport. The UI paints
+                            // the still itself from `uri`.
+                            let _ = engine.Pause();
+                            let _ = engine.SetCurrentTime(0.0);
+                            still = Some(source.clone());
+                            uri = Some(source);
+                            intent = Intent::Loaded;
+                            if !embedded {
+                                let _ = ShowWindow(hwnd, SW_HIDE);
+                            }
+                        } else if let Err(e) = engine.SetSource(&BSTR::from(source.as_str())) {
+                            still = None;
                             problem = Some(format!("set source: {e}"));
                             intent = Intent::Idle;
                         } else {
                             // Do not autoplay: SetSource starts the source resolver
                             // and, for some media, playback; a DMR must wait for
                             // the controller's Play.
+                            still = None;
                             let _ = engine.SetVolume(volume);
                             let _ = engine.SetMuted(muted);
                             let _ = engine.Pause();
                             uri = Some(source);
                             intent = Intent::Loaded;
-                            if show_video {
+                            // An embedded surface is placed by the launcher; a
+                            // standalone one shows itself.
+                            if show_video && !embedded {
                                 let _ = ShowWindow(hwnd, SW_SHOW);
                             }
                         }
                     }
                     Command::Play => {
-                        if let Err(e) = engine.Play() {
+                        if still.is_some() {
+                            intent = Intent::Playing;
+                        } else if let Err(e) = engine.Play() {
                             problem = Some(format!("play: {e}"));
                         } else {
                             intent = Intent::Playing;
                         }
                     }
                     Command::Pause => {
-                        if let Err(e) = engine.Pause() {
+                        if still.is_some() {
+                            intent = Intent::Paused;
+                        } else if let Err(e) = engine.Pause() {
                             problem = Some(format!("pause: {e}"));
                         } else {
                             intent = Intent::Paused;
@@ -441,10 +639,12 @@ fn pump(
                         intent = Intent::Stopped;
                     }
                     Command::Seek(seconds) => {
-                        if let Err(e) = engine.SetCurrentTime(seconds) {
-                            problem = Some(format!("seek: {e}"));
-                        } else {
-                            position = seconds;
+                        if still.is_none() {
+                            if let Err(e) = engine.SetCurrentTime(seconds) {
+                                problem = Some(format!("seek: {e}"));
+                            } else {
+                                position = seconds;
+                            }
                         }
                     }
                     Command::Volume(v) => {
@@ -455,45 +655,62 @@ fn pump(
                         muted = m;
                         let _ = engine.SetMuted(m);
                     }
+                    Command::Present(rect) => {
+                        place = rect;
+                        place_surface(hwnd, &engine, place, &mut applied);
+                    }
                     Command::Quit => quit = true,
                 }
             }
             if quit {
                 break;
             }
-
-            let ready_state = engine.GetReadyState();
-            let ended = engine.IsEnded().as_bool();
-            let reported = engine.GetError().ok().map(|error| error.GetErrorCode());
-            if let Some(code) = reported.filter(|code| *code != 0) {
-                if problem.is_none() {
-                    problem = Some(format!("media engine error {code}"));
-                }
+            // The video size is only known once the engine has read the header,
+            // so the letterboxed placement is recomputed until it settles.
+            if place.is_some() && still.is_none() {
+                place_surface(hwnd, &engine, place, &mut applied);
             }
-            let engine_position = engine.GetCurrentTime();
-            if engine_position.is_finite() && engine_position >= 0.0 {
-                position = engine_position;
-            }
-            let engine_duration = engine.GetDuration();
-            if engine_duration.is_finite() && engine_duration >= 0.0 {
-                duration = engine_duration;
-            }
-
-            let phase = if problem.is_some() {
-                Phase::Error
-            } else if ended && matches!(intent, Intent::Playing) {
-                Phase::Ended
-            } else {
+            let phase = if still.is_some() {
                 match intent {
                     Intent::Idle => Phase::Idle,
                     Intent::Loaded | Intent::Stopped => Phase::Stopped,
-                    // A controller that pressed Play is TRANSITIONING until the
-                    // engine has data; saying PLAYING during the buffer gap makes
-                    // some controllers show a frozen first frame as live.
-                    Intent::Playing if ready_state == 0 => Phase::Loading,
                     Intent::Playing => Phase::Playing,
-                    Intent::Paused if ready_state == 0 => Phase::Loading,
                     Intent::Paused => Phase::Paused,
+                }
+            } else {
+                let ready_state = engine.GetReadyState();
+                let ended = engine.IsEnded().as_bool();
+                let reported = engine.GetError().ok().map(|error| error.GetErrorCode());
+                if let Some(code) = reported.filter(|code| *code != 0) {
+                    if problem.is_none() {
+                        problem = Some(format!("media engine error {code}"));
+                    }
+                }
+                let engine_position = engine.GetCurrentTime();
+                if engine_position.is_finite() && engine_position >= 0.0 {
+                    position = engine_position;
+                }
+                let engine_duration = engine.GetDuration();
+                if engine_duration.is_finite() && engine_duration >= 0.0 {
+                    duration = engine_duration;
+                }
+
+                if problem.is_some() {
+                    Phase::Error
+                } else if ended && matches!(intent, Intent::Playing) {
+                    Phase::Ended
+                } else {
+                    match intent {
+                        Intent::Idle => Phase::Idle,
+                        Intent::Loaded | Intent::Stopped => Phase::Stopped,
+                        // A controller that pressed Play is TRANSITIONING until the
+                        // engine has data; saying PLAYING during the buffer gap makes
+                        // some controllers show a frozen first frame as live.
+                        Intent::Playing if ready_state == 0 => Phase::Loading,
+                        Intent::Playing => Phase::Playing,
+                        Intent::Paused if ready_state == 0 => Phase::Loading,
+                        Intent::Paused => Phase::Paused,
+                    }
                 }
             };
 

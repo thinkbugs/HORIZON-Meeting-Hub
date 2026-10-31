@@ -38,7 +38,8 @@
 
       body {
         width: 372px;
-        background: var(--bg);
+        padding: 6px;
+        background: #04060b;
         color: var(--text);
         font: 13px/1.5 "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI",
           system-ui, sans-serif;
@@ -46,21 +47,24 @@
         overflow: hidden;
       }
 
-      body::before {
-        content: "";
-        position: fixed;
-        inset: -30% -20% auto -20%;
-        height: 380px;
-        background:
-          radial-gradient(48% 60% at 22% 18%, rgba(90, 209, 255, 0.16), transparent 70%),
-          radial-gradient(42% 52% at 82% 4%, rgba(111, 127, 255, 0.14), transparent 72%);
-        filter: blur(6px);
-        pointer-events: none;
-      }
-
+      /* The page is the frame: 6px of near-black around a rounded app panel.
+         The popup window's own corners belong to the browser; this is the part
+         an extension can draw, so it gets a hairline, an inner highlight and a
+         soft drop shadow instead of a flat full-bleed rectangle. */
       .shell {
         position: relative;
-        padding: 15px 16px 13px;
+        padding: 12px 16px 10px;
+        border-radius: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        background:
+          radial-gradient(48% 60% at 22% 10%, rgba(90, 209, 255, 0.15), transparent 70%),
+          radial-gradient(42% 52% at 82% 2%, rgba(111, 127, 255, 0.13), transparent 72%),
+          var(--bg);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.06),
+          0 0 0 1px rgba(0, 0, 0, 0.45),
+          0 24px 60px -34px rgba(0, 0, 0, 0.95);
+        overflow: hidden;
       }
 
       /* ------------------------------------------------------------- header */
@@ -69,7 +73,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        margin-bottom: 13px;
+        margin-bottom: 9px;
       }
 
       .brand {
@@ -168,7 +172,7 @@
 
       .hero {
         position: relative;
-        padding: 14px;
+        padding: 9px 12px;
         border-radius: var(--radius-lg);
         border: 1px solid var(--line);
         background:
@@ -205,22 +209,22 @@
         position: relative;
         display: flex;
         align-items: center;
-        gap: 13px;
-        min-height: 58px;
+        gap: 11px;
+        min-height: 44px;
       }
 
       .art {
         position: relative;
         flex: none;
-        width: 56px;
-        height: 56px;
+        width: 44px;
+        height: 44px;
         display: grid;
         place-items: center;
       }
 
       .art svg {
-        width: 56px;
-        height: 56px;
+        width: 44px;
+        height: 44px;
         overflow: visible;
       }
 
@@ -276,7 +280,7 @@
 
       .hero__copy h1 {
         margin: 0;
-        font-size: 15.5px;
+        font-size: 14.5px;
         font-weight: 600;
         letter-spacing: 0.01em;
       }
@@ -284,7 +288,7 @@
       .hero__copy p {
         margin: 3px 0 0;
         color: var(--muted);
-        font-size: 11.5px;
+        font-size: 11px;
         line-height: 1.45;
         display: block;
         overflow: hidden;
@@ -352,8 +356,8 @@
       /* ----------------------------------------------------------- receiver */
 
       .receiver {
-        margin-top: 14px;
-        padding: 12px;
+        margin-top: 10px;
+        padding: 10px;
         border: 1px solid var(--line);
         border-radius: 19px;
         background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.022));
@@ -367,7 +371,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
       }
 
       .receiver__head label,
@@ -420,7 +424,11 @@
 
       .receivers {
         display: grid;
-        gap: 6px;
+        gap: 5px;
+        max-height: 74px;
+        padding-right: 2px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
       }
 
       .receivers__empty {
@@ -448,8 +456,8 @@
       .pick__card {
         display: flex;
         align-items: center;
-        gap: 9px;
-        padding: 9px 11px;
+        gap: 8px;
+        padding: 6px 10px;
         border: 1px solid var(--line);
         border-radius: var(--radius-sm);
         background: rgba(255, 255, 255, 0.035);
@@ -485,12 +493,18 @@
         box-shadow: 0 0 0 3px rgba(75, 227, 164, 0.14);
       }
 
+      /* Name, address and badge share one baseline: the popup has to stay inside
+         Chrome's 600px cap, and a second line per receiver costs 20px a row. */
       .pick__copy {
-        display: grid;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        flex: 1;
         min-width: 0;
       }
 
       .pick__copy strong {
+        flex: 0 1 auto;
         overflow: hidden;
         font-size: 12px;
         font-weight: 600;
@@ -499,6 +513,7 @@
       }
 
       .pick__copy span {
+        flex: none;
         color: var(--faint);
         font: 10px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
       }
@@ -515,12 +530,12 @@
 
       .code {
         display: block;
-        margin-top: 10px;
+        margin-top: 8px;
       }
 
       .code__label {
         display: block;
-        margin-bottom: 5px;
+        margin-bottom: 4px;
         color: var(--muted);
         font-size: 11px;
         letter-spacing: 0.02em;
@@ -528,12 +543,12 @@
 
       .code__input {
         width: 100%;
-        height: 44px;
+        height: 38px;
         border: 1px solid var(--line);
         border-radius: 14px;
         background: rgba(255, 255, 255, 0.045);
         color: var(--text);
-        font: 600 20px/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
+        font: 600 19px/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
         letter-spacing: 0.3em;
         text-align: center;
         text-indent: 0.3em;
@@ -560,7 +575,7 @@
       }
 
       .manual {
-        margin-top: 10px;
+        margin-top: 8px;
       }
 
       .manual summary {
@@ -641,7 +656,7 @@
       }
 
       .receiver__hint {
-        margin: 9px 0 0;
+        margin: 8px 0 0;
         color: var(--faint);
         font-size: 10.5px;
         line-height: 1.45;
@@ -651,8 +666,8 @@
 
       .actions {
         display: grid;
-        gap: 8px;
-        margin-top: 13px;
+        gap: 6px;
+        margin-top: 10px;
       }
 
       body[data-phase="live"] .actions,
@@ -668,9 +683,9 @@
       .action {
         display: flex;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
         width: 100%;
-        padding: 10px 12px;
+        padding: 7px 11px;
         border-radius: var(--radius-sm);
         border: 1px solid var(--line);
         background: var(--surface);
@@ -728,9 +743,9 @@
         display: grid;
         place-items: center;
         flex: none;
-        width: 34px;
-        height: 34px;
-        border-radius: 11px;
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
         border: 1px solid rgba(255, 255, 255, 0.08);
         background: rgba(255, 255, 255, 0.05);
         color: var(--muted);
@@ -817,6 +832,641 @@
         background: currentColor;
       }
 
+      /* --------------------------------------------------------- panes */
+      /* The three functions are one popup wide: 投屏 keeps the mirror controls,
+         文件 posts to the receiver's inbox, 媒体 edits the hub's library and
+         queue, and can cast directly to the DLNA renderer. Nothing here is a
+         second window — the operator only ever opens one dropdown off the toolbar. */
+
+      .segment {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        gap: 3px;
+        margin: 0 0 9px;
+        padding: 3px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .segment__item {
+        height: 28px;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        font-size: 12px;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        transition:
+          background 180ms var(--ease),
+          color 180ms var(--ease);
+      }
+
+      .segment__item:hover {
+        color: var(--text);
+      }
+
+      .segment__item.is-active {
+        background: rgba(90, 209, 255, 0.16);
+        color: var(--accent);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+      }
+
+      .segment__item:focus-visible {
+        outline: 2px solid rgba(90, 209, 255, 0.7);
+        outline-offset: 2px;
+      }
+
+      .pane[hidden] {
+        display: none;
+      }
+
+      .pane__note {
+        margin: 0 0 10px;
+        color: var(--faint);
+        font-size: 10.5px;
+        line-height: 1.5;
+      }
+
+      .pane__status {
+        margin: 0;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.45;
+      }
+
+      .pane__status.is-error {
+        color: var(--danger);
+      }
+
+      .pane__status.is-ok {
+        color: var(--success);
+      }
+
+      /* ------------------------------------------------------ file transfer */
+      /* The operator arrives on this page with files already in hand, so the
+         picker is a target — not two small buttons above a grey list. */
+
+      .dropzone {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        padding: 13px 14px;
+        border: 1px dashed var(--line-strong);
+        border-radius: var(--radius-lg);
+        background:
+          linear-gradient(158deg, rgba(90, 209, 255, 0.07), rgba(255, 255, 255, 0.015)),
+          rgba(10, 15, 22, 0.6);
+        color: var(--text);
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          border-color 180ms var(--ease),
+          background 180ms var(--ease),
+          box-shadow 180ms var(--ease);
+      }
+
+      .dropzone:hover {
+        border-color: rgba(90, 209, 255, 0.5);
+        background:
+          linear-gradient(158deg, rgba(90, 209, 255, 0.11), rgba(255, 255, 255, 0.02)),
+          rgba(10, 15, 22, 0.6);
+      }
+
+      .dropzone:focus-visible {
+        outline: 2px solid rgba(90, 209, 255, 0.7);
+        outline-offset: 2px;
+      }
+
+      .dropzone.is-drag {
+        border-color: var(--accent);
+        background: rgba(90, 209, 255, 0.12);
+        box-shadow:
+          0 0 0 3px rgba(90, 209, 255, 0.14),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      }
+
+      .dropzone__icon {
+        display: grid;
+        place-items: center;
+        flex: none;
+        width: 40px;
+        height: 40px;
+        border-radius: 13px;
+        border: 1px solid rgba(90, 209, 255, 0.28);
+        background: rgba(90, 209, 255, 0.12);
+        color: var(--accent);
+        transition: background 180ms var(--ease);
+      }
+
+      .dropzone.is-drag .dropzone__icon {
+        background: rgba(90, 209, 255, 0.22);
+      }
+
+      .dropzone__copy {
+        display: grid;
+        gap: 1px;
+        min-width: 0;
+      }
+
+      .dropzone__copy strong {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .dropzone__copy small {
+        color: var(--muted);
+        font-size: 10.5px;
+      }
+
+      .dropzone__tag {
+        flex: none;
+        margin-left: auto;
+        padding: 2px 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-pill);
+        color: var(--faint);
+        font-size: 9.5px;
+        letter-spacing: 0.04em;
+      }
+
+      .rows--files {
+        max-height: 168px;
+      }
+
+      .send {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        margin-top: 10px;
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        border: 1px solid rgba(90, 209, 255, 0.34);
+        background:
+          linear-gradient(180deg, rgba(90, 209, 255, 0.19), rgba(90, 209, 255, 0.07)),
+          rgba(10, 16, 24, 0.6);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.12),
+          0 14px 30px -24px rgba(90, 209, 255, 0.9);
+        color: var(--text);
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          transform 180ms var(--ease),
+          border-color 180ms var(--ease),
+          background 180ms var(--ease),
+          box-shadow 180ms var(--ease),
+          opacity 180ms var(--ease);
+      }
+
+      .send:hover:not(:disabled) {
+        transform: translateY(-1px);
+        border-color: rgba(90, 209, 255, 0.55);
+        background:
+          linear-gradient(180deg, rgba(90, 209, 255, 0.26), rgba(90, 209, 255, 0.1)),
+          rgba(10, 16, 24, 0.6);
+      }
+
+      .send:active:not(:disabled) {
+        transform: translateY(0) scale(0.995);
+      }
+
+      .send:focus-visible {
+        outline: 2px solid rgba(90, 209, 255, 0.7);
+        outline-offset: 2px;
+      }
+
+      .send:disabled {
+        opacity: 0.42;
+        cursor: default;
+        box-shadow: none;
+      }
+
+      .send__glyph {
+        display: grid;
+        place-items: center;
+        flex: none;
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        border: 1px solid rgba(90, 209, 255, 0.28);
+        background: rgba(90, 209, 255, 0.12);
+        color: var(--accent);
+      }
+
+      .send__copy {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        line-height: 1.3;
+      }
+
+      .send__copy strong {
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+
+      .send__copy small {
+        color: var(--muted);
+        font-size: 10.5px;
+      }
+
+      .send__arrow {
+        display: grid;
+        place-items: center;
+        margin-left: auto;
+        color: var(--faint);
+        transition:
+          transform 180ms var(--ease),
+          color 180ms var(--ease);
+      }
+
+      .send:hover:not(:disabled) .send__arrow {
+        transform: translateX(2px);
+        color: var(--muted);
+      }
+
+      .send__meter {
+        display: block;
+        height: 3px;
+        margin-top: 7px;
+        border-radius: var(--radius-pill);
+        background: rgba(255, 255, 255, 0.06);
+        overflow: hidden;
+      }
+
+      .send__meter[hidden] {
+        display: none;
+      }
+
+      .send__meter span {
+        display: block;
+        width: 36%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, transparent, var(--accent), transparent);
+        animation: meter 1.1s linear infinite;
+      }
+
+      .transfer-status {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin: 9px 0 0;
+        color: var(--muted);
+        font-size: 10.5px;
+        line-height: 1.45;
+      }
+
+      .transfer-status__dot {
+        flex: none;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--faint);
+      }
+
+      .transfer-status.is-ok {
+        color: var(--success);
+      }
+
+      .transfer-status.is-ok .transfer-status__dot {
+        background: var(--success);
+        box-shadow: 0 0 0 3px rgba(75, 227, 164, 0.14);
+      }
+
+      .transfer-status.is-error {
+        color: var(--danger);
+      }
+
+      .transfer-status.is-error .transfer-status__dot {
+        background: var(--danger);
+        box-shadow: 0 0 0 3px rgba(255, 114, 133, 0.14);
+      }
+
+      .group {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin: 13px 0 7px;
+      }
+
+      .group__title {
+        margin: 0;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+      }
+
+      .group__count {
+        color: var(--faint);
+        font-size: 10.5px;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .mini {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 30px;
+        padding: 0 11px;
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        background: var(--surface);
+        color: var(--text);
+        font: inherit;
+        font-size: 11.5px;
+        cursor: pointer;
+        transition:
+          background 180ms var(--ease),
+          border-color 180ms var(--ease),
+          opacity 180ms var(--ease);
+      }
+
+      .mini:hover:not(:disabled) {
+        background: var(--surface-2);
+        border-color: rgba(90, 209, 255, 0.45);
+      }
+
+      .mini:focus-visible {
+        outline: 2px solid rgba(90, 209, 255, 0.7);
+        outline-offset: 2px;
+      }
+
+      .mini:disabled {
+        opacity: 0.42;
+        cursor: default;
+      }
+
+      .rows {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 6px;
+        max-height: 190px;
+        margin: 0;
+        padding: 0 2px 0 0;
+        list-style: none;
+        overflow-y: auto;
+      }
+
+      .rows:empty {
+        display: none;
+      }
+
+      /* Chrome stops growing a toolbar popup at 800×600 and gives it a scrollbar
+         past that, so the two lists share one budget: the queue is the thing being
+         watched and gets its own fixed height, the library takes what is left and
+         scrolls. */
+      .rows--queue {
+        max-height: 150px;
+      }
+
+      /* Native scrollbars are ~15px and light gray, which reads as a defect inside
+         a 326px dark card; every scroll area in the popup gets the same 6px thumb. */
+      .receivers,
+      .rows {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+      }
+
+      .receivers::-webkit-scrollbar,
+      .rows::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      .receivers::-webkit-scrollbar-track,
+      .rows::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .receivers::-webkit-scrollbar-thumb,
+      .rows::-webkit-scrollbar-thumb {
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.18);
+      }
+
+      .receivers::-webkit-scrollbar-thumb:hover,
+      .rows::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.3);
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        padding: 7px 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        background: var(--surface);
+      }
+
+      .row.is-current {
+        border-color: rgba(90, 209, 255, 0.5);
+        background: linear-gradient(180deg, rgba(90, 209, 255, 0.13), rgba(90, 209, 255, 0.04));
+      }
+
+      .row__slot {
+        flex: none;
+        width: 15px;
+        color: var(--faint);
+        font-size: 10.5px;
+        text-align: right;
+      }
+
+      .row__kind {
+        flex: none;
+        padding: 2px 6px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-pill);
+        color: var(--muted);
+        font-size: 9.5px;
+        letter-spacing: 0.04em;
+      }
+
+      .row__main {
+        min-width: 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        border: 0;
+        background: transparent;
+        padding: 0;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .row__main:not(button) {
+        cursor: default;
+      }
+
+      .row__main:hover:not(:disabled) .row__title {
+        color: var(--accent);
+      }
+
+      .row__title {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        font-size: 12px;
+      }
+
+      .row__meta {
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .row__badge {
+        margin-left: 6px;
+        padding: 0 5px;
+        border: 1px solid rgba(255, 192, 97, 0.4);
+        border-radius: var(--radius-pill);
+        color: var(--warning);
+        font-size: 9px;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+
+      .row__ops {
+        flex: none;
+        display: flex;
+        gap: 3px;
+      }
+
+      .op {
+        display: grid;
+        place-items: center;
+        width: 25px;
+        height: 25px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--muted);
+        font: inherit;
+        font-size: 11px;
+        cursor: pointer;
+        transition:
+          color 180ms var(--ease),
+          border-color 180ms var(--ease),
+          background 180ms var(--ease);
+      }
+
+      .op:hover:not(:disabled) {
+        color: var(--accent);
+        border-color: rgba(90, 209, 255, 0.45);
+        background: rgba(90, 209, 255, 0.1);
+      }
+
+      .op:focus-visible {
+        outline: 2px solid rgba(90, 209, 255, 0.7);
+        outline-offset: 1px;
+      }
+
+      .op:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+
+      .op--danger:hover:not(:disabled) {
+        color: var(--danger);
+        border-color: rgba(255, 114, 133, 0.45);
+        background: rgba(255, 114, 133, 0.1);
+      }
+
+      .rows__empty {
+        padding: 9px 10px;
+        border: 1px dashed var(--line);
+        border-radius: var(--radius-sm);
+        color: var(--faint);
+        font-size: 10.5px;
+        line-height: 1.5;
+      }
+
+      .urlbar {
+        display: flex;
+        gap: 6px;
+        margin-top: 10px;
+      }
+
+      .urlbar input {
+        min-width: 0;
+        flex: 1;
+        height: 30px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text);
+        font: 11px/1 ui-monospace, "Cascadia Mono", Consolas, monospace;
+        outline: none;
+      }
+
+      .urlbar input:focus {
+        border-color: rgba(90, 209, 255, 0.55);
+        box-shadow: 0 0 0 3px rgba(90, 209, 255, 0.13);
+      }
+
+      .nowplaying {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+        padding: 7px 9px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-sm);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .nowplaying__dot {
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--faint);
+      }
+
+      .nowplaying__dot.is-on {
+        background: var(--success);
+        box-shadow: 0 0 0 3px rgba(75, 227, 164, 0.18);
+      }
+
+      .nowplaying__copy {
+        min-width: 0;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .nowplaying__title {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        font-size: 11.5px;
+      }
+
+      .nowplaying__state {
+        color: var(--faint);
+        font-size: 10px;
+      }
+
       /* ------------------------------------------------------------- footer */
 
       .foot {
@@ -824,7 +1474,7 @@
         align-items: center;
         justify-content: center;
         gap: 6px;
-        margin-top: 12px;
+        margin-top: 6px;
         color: var(--faint);
         font-size: 10px;
         letter-spacing: 0.02em;
@@ -859,6 +1509,15 @@
         100% {
           transform: scale(1.06);
           opacity: 0.08;
+        }
+      }
+
+      @keyframes meter {
+        from {
+          transform: translateX(-120%);
+        }
+        to {
+          transform: translateX(340%);
         }
       }
 
@@ -905,127 +1564,255 @@
         </span>
       </header>
 
-      <section class="hero" aria-labelledby="heroTitle">
-        <div class="hero__top">
-          <div class="art" aria-hidden="true">
-            <svg viewBox="0 0 56 56" fill="none">
-              <circle class="ring ring-1" cx="28" cy="28" r="24" stroke="rgba(90,209,255,0.30)" stroke-width="1" />
-              <circle class="ring ring-2" cx="28" cy="28" r="17" stroke="rgba(90,209,255,0.45)" stroke-width="1" />
-              <circle class="ring ring-3" cx="28" cy="28" r="10" stroke="rgba(90,209,255,0.62)" stroke-width="1" />
-              <circle class="core" cx="28" cy="28" r="3.2" fill="#5ad1ff" />
-            </svg>
-          </div>
-          <div class="hero__copy">
-            <h1 id="heroTitle">准备投放</h1>
-            <p id="detail">选择一种投放方式，画面与声音只在局域网内。</p>
-          </div>
-        </div>
-        <div id="stats" class="metrics" aria-live="polite"></div>
-      </section>
+      <nav class="segment" role="tablist" aria-label="功能">
+        <button id="paneCast" class="segment__item is-active" type="button" role="tab"
+          aria-selected="true" aria-controls="pane-cast" data-pane="cast">投屏</button>
+        <button id="paneFile" class="segment__item" type="button" role="tab"
+          aria-selected="false" aria-controls="pane-file" data-pane="file">文件</button>
+        <button id="paneMedia" class="segment__item" type="button" role="tab"
+          aria-selected="false" aria-controls="pane-media" data-pane="media">媒体</button>
+      </nav>
 
-      <form id="receiver" class="receiver" autocomplete="off">
-        <div class="receiver__head">
-          <span class="receiver__title">接收端</span>
-          <button id="scan" type="button" class="scan">
-            <span class="scan__dot" aria-hidden="true"></span>
-            <span id="scanLabel">搜索局域网</span>
+      <section class="pane" id="pane-cast" role="tabpanel" aria-labelledby="paneCast">
+        <section class="hero" aria-labelledby="heroTitle">
+          <div class="hero__top">
+            <div class="art" aria-hidden="true">
+              <svg viewBox="0 0 56 56" fill="none">
+                <circle class="ring ring-1" cx="28" cy="28" r="24" stroke="rgba(90,209,255,0.30)" stroke-width="1" />
+                <circle class="ring ring-2" cx="28" cy="28" r="17" stroke="rgba(90,209,255,0.45)" stroke-width="1" />
+                <circle class="ring ring-3" cx="28" cy="28" r="10" stroke="rgba(90,209,255,0.62)" stroke-width="1" />
+                <circle class="core" cx="28" cy="28" r="3.2" fill="#5ad1ff" />
+              </svg>
+            </div>
+            <div class="hero__copy">
+              <h1 id="heroTitle">准备投放</h1>
+              <p id="detail">选择一种投放方式，画面与声音只在局域网内。</p>
+            </div>
+          </div>
+          <div id="stats" class="metrics" aria-live="polite"></div>
+        </section>
+
+        <form id="receiver" class="receiver" autocomplete="off">
+          <div class="receiver__head">
+            <span class="receiver__title">接收端</span>
+            <button id="scan" type="button" class="scan">
+              <span class="scan__dot" aria-hidden="true"></span>
+              <span id="scanLabel">搜索局域网</span>
+            </button>
+          </div>
+
+          <div id="receivers" class="receivers" role="radiogroup" aria-label="发现的接收端"></div>
+          <p id="receiverEmpty" class="receivers__empty" hidden>
+            没有发现接收端。请确认大屏的浏览器投屏已开启，或展开下方手动填写地址。
+          </p>
+
+          <label class="code" for="code">
+            <span class="code__label">投屏码</span>
+            <input
+              id="code"
+              class="code__input"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="6 位数字"
+              aria-describedby="receiverHint"
+            />
+          </label>
+
+          <details class="manual">
+            <summary>手动填写接收端地址</summary>
+            <div class="field">
+              <span class="field__glyph" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M10 14a4.5 4.5 0 0 0 6.4 0l2.6-2.6a4.5 4.5 0 1 0-6.4-6.4L11.4 6"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                  />
+                  <path
+                    d="M14 10a4.5 4.5 0 0 0-6.4 0l-2.6 2.6a4.5 4.5 0 1 0 6.4 6.4L12.6 18"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </span>
+              <input
+                id="address"
+                spellcheck="false"
+                inputmode="url"
+                placeholder="192.168.0.52:9407 或 ws://…/stream?token=…"
+              />
+            </div>
+          </details>
+
+          <p id="receiverHint" class="receiver__hint">
+            在大屏的「浏览器投屏」卡片上能看到 6 位投屏码，输入后即可投放，无需复制地址。
+          </p>
+        </form>
+
+        <div class="actions">
+          <button id="tab" type="button" class="action action--primary">
+            <span class="action__glyph" aria-hidden="true">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                <rect x="3.5" y="5" width="17" height="14" rx="2.6" stroke="currentColor" stroke-width="1.6" />
+                <path d="M3.5 9h17" stroke="currentColor" stroke-width="1.6" />
+                <circle cx="6.4" cy="7" r="0.95" fill="currentColor" />
+              </svg>
+            </span>
+            <span class="action__copy">
+              <strong>投放当前标签页</strong>
+              <small>含标签页声音</small>
+            </span>
+            <span class="action__arrow" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+          </button>
+
+          <button id="screen" type="button" class="action">
+            <span class="action__glyph" aria-hidden="true">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                <rect x="3" y="4.5" width="18" height="12.5" rx="2.4" stroke="currentColor" stroke-width="1.6" />
+                <path d="M9 20.5h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                <path d="M12 17v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="action__copy">
+              <strong>投放屏幕或窗口</strong>
+              <small>可选择分享系统音频</small>
+            </span>
+            <span class="action__arrow" aria-hidden="true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
           </button>
         </div>
 
-        <div id="receivers" class="receivers" role="radiogroup" aria-label="发现的接收端"></div>
-        <p id="receiverEmpty" class="receivers__empty" hidden>
-          没有发现接收端。请确认大屏的浏览器投屏已开启，或展开下方手动填写地址。
-        </p>
+        <button id="stop" type="button" class="stop" disabled hidden>
+          <span class="stop__square" aria-hidden="true"></span>
+          停止投屏
+        </button>
+      </section>
 
-        <label class="code" for="code">
-          <span class="code__label">投屏码</span>
-          <input
-            id="code"
-            class="code__input"
-            inputmode="numeric"
-            maxlength="6"
-            placeholder="6 位数字"
-            aria-describedby="receiverHint"
-          />
-        </label>
-
-        <details class="manual">
-          <summary>手动填写接收端地址</summary>
-          <div class="field">
-            <span class="field__glyph" aria-hidden="true">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M10 14a4.5 4.5 0 0 0 6.4 0l2.6-2.6a4.5 4.5 0 1 0-6.4-6.4L11.4 6"
-                  stroke="currentColor"
-                  stroke-width="1.7"
-                  stroke-linecap="round"
-                />
-                <path
-                  d="M14 10a4.5 4.5 0 0 0-6.4 0l-2.6 2.6a4.5 4.5 0 1 0 6.4 6.4L12.6 18"
-                  stroke="currentColor"
-                  stroke-width="1.7"
-                  stroke-linecap="round"
-                />
-              </svg>
-            </span>
-            <input
-              id="address"
-              spellcheck="false"
-              inputmode="url"
-              placeholder="192.168.0.52:9407 或 ws://…/stream?token=…"
-            />
-          </div>
-        </details>
-
-        <p id="receiverHint" class="receiver__hint">
-          在大屏的「浏览器投屏」卡片上能看到 6 位投屏码，输入后即可投放，无需复制地址。
-        </p>
-      </form>
-
-      <div class="actions">
-        <button id="tab" type="button" class="action action--primary">
-          <span class="action__glyph" aria-hidden="true">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-              <rect x="3.5" y="5" width="17" height="14" rx="2.6" stroke="currentColor" stroke-width="1.6" />
-              <path d="M3.5 9h17" stroke="currentColor" stroke-width="1.6" />
-              <circle cx="6.4" cy="7" r="0.95" fill="currentColor" />
+      <section class="pane" id="pane-file" role="tabpanel" aria-labelledby="paneFile" hidden>
+        <button id="fileDrop" class="dropzone" type="button" aria-describedby="fileDropHint">
+          <span class="dropzone__icon" aria-hidden="true">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+              <path d="M12 15.5V5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+              <path
+                d="M7.6 9.4 12 5l4.4 4.4"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                d="M4.5 15.2v2.3a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-2.3"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+              />
             </svg>
           </span>
-          <span class="action__copy">
-            <strong>投放当前标签页</strong>
-            <small>含标签页声音</small>
+          <span class="dropzone__copy">
+            <strong>选择文件或拖到这里</strong>
+            <small id="fileDropHint">可多选 · 落到接收目录，不进片库</small>
           </span>
-          <span class="action__arrow" aria-hidden="true">
+          <span class="dropzone__tag">局域网</span>
+        </button>
+        <input id="files" type="file" multiple hidden />
+
+        <div class="group">
+          <h2 class="group__title">待发送</h2>
+          <span class="group__count" id="fileCount">0 个</span>
+        </div>
+        <ul id="fileList" class="rows rows--files" aria-label="待发送的文件"></ul>
+
+        <button id="sendFiles" type="button" class="send" disabled>
+          <span class="send__glyph" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M20 4 4.4 10.6l5.9 2.5 2.5 6.1L20 4Z"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linejoin="round"
+              />
+              <path d="m10.3 13.1 3.4-3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            </svg>
+          </span>
+          <span class="send__copy">
+            <strong>发送文件</strong>
+            <small>选择文件后发送</small>
+          </span>
+          <span class="send__arrow" aria-hidden="true">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
               <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </span>
         </button>
+        <span class="send__meter" id="sendMeter" hidden aria-hidden="true"><span></span></span>
 
-        <button id="screen" type="button" class="action">
-          <span class="action__glyph" aria-hidden="true">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="4.5" width="18" height="12.5" rx="2.4" stroke="currentColor" stroke-width="1.6" />
-              <path d="M9 20.5h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-              <path d="M12 17v3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-            </svg>
-          </span>
-          <span class="action__copy">
-            <strong>投放屏幕或窗口</strong>
-            <small>可选择分享系统音频</small>
-          </span>
-          <span class="action__arrow" aria-hidden="true">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-              <path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </span>
-        </button>
-      </div>
+        <p id="fileStatus" class="transfer-status" role="status">
+          <span class="transfer-status__dot" aria-hidden="true"></span>
+          <span id="fileStatusText">还没有选择文件。</span>
+        </p>
+      </section>
 
-      <button id="stop" type="button" class="stop" disabled hidden>
-        <span class="stop__square" aria-hidden="true"></span>
-        停止投屏
-      </button>
+      <section class="pane" id="pane-media" role="tabpanel" aria-labelledby="paneMedia" hidden>
+        <p id="mediaStatus" class="pane__status">正在连接大屏…</p>
+
+        <div class="toolbar">
+          <button id="pickMedia" type="button" class="mini" disabled>上传到片库</button>
+          <button id="refreshMedia" type="button" class="mini" disabled>重新读取</button>
+        </div>
+        <input id="mediaFiles" type="file" multiple hidden />
+
+        <div class="group">
+          <h2 class="group__title">播放队列</h2>
+          <span class="group__count" id="queueCount">—</span>
+        </div>
+        <div class="nowplaying">
+          <span class="nowplaying__dot" id="nowDot" aria-hidden="true"></span>
+          <span class="nowplaying__copy">
+            <span class="nowplaying__title" id="nowTitle">队列是空的</span>
+            <span class="nowplaying__state" id="nowState">未播放</span>
+          </span>
+          <button id="playToggle" type="button" class="op" title="播放或暂停" disabled>▶</button>
+          <button id="stopPlayback" type="button" class="op" title="停止播放" disabled>■</button>
+        </div>
+        <ul id="queueList" class="rows rows--queue" aria-label="投屏队列"></ul>
+
+        <div class="group">
+          <h2 class="group__title">主机片库</h2>
+          <span class="group__count" id="libraryCount">—</span>
+        </div>
+        <ul id="libraryList" class="rows" aria-label="主机片库"></ul>
+
+        <form class="urlbar" id="urlForm" autocomplete="off">
+          <input id="urlInput" type="url" placeholder="粘贴一个网络媒体地址，不上传、直接投" />
+          <button id="urlAdd" type="submit" class="mini" disabled>存入片库</button>
+        </form>
+
+        <div class="group">
+          <h2 class="group__title">DLNA 直投</h2>
+          <span class="group__count" id="dlnaCount">—</span>
+        </div>
+        <p class="pane__note" id="dlnaNote">直接投一条到大屏的 DLNA 接收器，不走队列。</p>
+        <button id="dlnaPick" type="button" class="mini" disabled>选择媒体文件</button>
+        <input id="dlnaFiles" type="file" multiple accept="video/*,audio/*,image/*" hidden />
+        <div class="nowplaying" id="dlnaNow" hidden>
+          <span class="nowplaying__dot" id="dlnaDot"></span>
+          <span class="nowplaying__copy">
+            <span class="nowplaying__title" id="dlnaTitle">—</span>
+            <span class="nowplaying__state" id="dlnaState">未播放</span>
+          </span>
+          <button id="dlnaPlayPause" type="button" class="op" title="播放或暂停" disabled>▶</button>
+          <button id="dlnaStop" type="button" class="op" title="停止" disabled>■</button>
+        </div>
+      </section>
 
       <footer class="foot">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -1036,6 +1823,7 @@
       </footer>
     </div>
 
+    <script src="media.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

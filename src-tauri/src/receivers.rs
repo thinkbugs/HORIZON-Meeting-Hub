@@ -7,8 +7,9 @@
 //! - AirPlay (RAOP) audio runs an accept loop on its own thread. Audio goes to
 //!   the default output device; the statistics are cumulative for the lifetime
 //!   of the receiver, which is what a status strip wants to show.
-//! - DLNA video runs the HTTP control plane plus its MediaEngine player; the
-//!   player owns its own visible window, so the panel only reports state.
+//! - DLNA video runs the HTTP control plane on top of the stage's player. It is
+//!   handed a `Transport` rather than creating one, so a controller, a phone and
+//!   the big screen all drive the same queue in front of the same surface.
 //!
 //! Both are idempotent: asking to start a running receiver returns its status
 //! instead of binding a second one.
@@ -29,10 +30,15 @@ use horizon_cast::browser::{
 };
 use horizon_cast::discovery::{primary_interface, Discovery, Protocol};
 use horizon_cast::dlna::{Dmr, DmrConfig};
-use horizon_cast::player::Phase;
+use horizon_cast::player::{Phase, Transport};
 use serde::{Deserialize, Serialize};
 use tauri::ipc::{Channel, Response as IpcResponse};
 use tauri::Manager;
+
+/// The port the renderer's description and control endpoints listen on. Fixed so
+/// a controller that saved this device keeps finding it at the same address after
+/// a restart; the firewall rule is program-scoped, so it needs no new entry.
+const DMR_HTTP_PORT: u16 = 8290;
 
 // ------------------------------------------------------------------ state
 
@@ -374,16 +380,34 @@ impl Receivers {
             .and_then(|slot| slot.as_ref().map(AirplayRuntime::status))
     }
 
-    pub fn start_dlna(&self, name: &str) -> Result<DlnaStatus, String> {
+    /// Start the renderer over the stage's player. `drive` is the queue seen as a
+    /// plain `Transport`: a controller's `SetAVTransportURI` becomes a one-item
+    /// queue, so the standard control plane keeps working while the native API can
+    /// still line up forty items in front of the same surface.
+    pub fn start_dlna(&self, name: &str, drive: Arc<dyn Transport>) -> Result<DlnaStatus, String> {
         let mut slot = self.lock_dlna()?;
         if let Some(runtime) = slot.as_ref() {
             return Ok(runtime.status());
         }
-        let dmr = Dmr::start(DmrConfig {
+        let mut config = DmrConfig {
             friendly_name: name.to_string(),
+            // A stable port makes `LOCATION` — and therefore a controller's
+            // bookmark of this renderer — survive a restart. SSDP still
+            // re-announces, so nothing depends on the number matching.
+            port: DMR_HTTP_PORT,
             ..DmrConfig::default()
-        })
-        .map_err(|error| format!("无法启动 DLNA 接收：{error}"))?;
+        };
+        let dmr = match Dmr::start_with(config.clone(), Arc::clone(&drive)) {
+            Ok(dmr) => dmr,
+            // Another renderer on this machine (or a leftover listener) owns the
+            // port. Losing DLNA over a port clash is not worth the argument, so
+            // take whatever the OS offers and report the address that resulted.
+            Err(first) => {
+                config.port = 0;
+                Dmr::start_with(config, drive)
+                    .map_err(|error| format!("无法启动 DLNA 接收：{error}（端口 {DMR_HTTP_PORT} 上已有一次失败：{first}）"))?
+            }
+        };
         let runtime = DlnaRuntime { dmr };
         let status = runtime.status();
         *slot = Some(runtime);
@@ -405,7 +429,12 @@ impl Receivers {
             .and_then(|slot| slot.as_ref().map(DlnaRuntime::status))
     }
 
-    pub fn start_browser(&self, name: &str, token: String) -> Result<BrowserStatus, String> {
+    pub fn start_browser(
+        &self,
+        name: &str,
+        token: String,
+        hub_port: Option<u16>,
+    ) -> Result<BrowserStatus, String> {
         let mut slot = self.lock_browser()?;
         if let Some(runtime) = slot.as_ref() {
             return Ok(runtime.status());
@@ -418,6 +447,7 @@ impl Receivers {
             port: BROWSER_MIRROR_PORT,
             name: name.to_string(),
             token: Some(token.clone()),
+            hub_port,
         };
         let receiver = BrowserMirrorReceiver::start(
             config,
@@ -853,10 +883,15 @@ pub async fn airplay_preview_stop(
 
 #[tauri::command]
 pub async fn dlna_start(
+    app: tauri::AppHandle,
     receivers: tauri::State<'_, Receivers>,
     name: String,
 ) -> Result<DlnaStatus, String> {
-    receivers.start_dlna(&name)
+    // The player belongs to the stage, not to this command: the renderer is handed
+    // the queue as a `Transport` so a controller and the big screen drive one
+    // surface instead of two decoders fighting over one window.
+    let runtime = crate::media_runtime(&app);
+    receivers.start_dlna(&name, runtime.stage.drive())
 }
 
 #[tauri::command]
@@ -870,7 +905,18 @@ pub async fn browser_start(
     receivers: tauri::State<'_, Receivers>,
     name: String,
 ) -> Result<BrowserStatus, String> {
-    receivers.start_browser(&name, browser_token(&app))
+    // The hub's port comes from the address the hub itself reported when it bound,
+    // so a sender learns the real number instead of guessing one.
+    let base = crate::media_runtime(&app).stage.base();
+    receivers.start_browser(&name, browser_token(&app), hub_port(&base))
+}
+
+/// The port inside the hub's own base address, or `None` when the hub never
+/// bound (`base` is empty) or named no port.
+fn hub_port(base: &str) -> Option<u16> {
+    let (_, rest) = base.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    authority.rsplit(':').next()?.parse().ok()
 }
 
 #[tauri::command]
@@ -982,5 +1028,17 @@ mod tests {
             frame.data.len()
         );
         assert_eq!(&body[24..], &frame.data);
+    }
+
+    #[test]
+    fn a_sender_learns_the_hub_port_from_the_hubs_own_address() {
+        assert_eq!(hub_port("http://192.168.0.27:7878"), Some(7878));
+        assert_eq!(hub_port("http://192.168.0.27:7878/media/x"), Some(7878));
+        assert_eq!(hub_port("http://[::1]:7878"), Some(7878));
+        // A hub that never bound, or bound without naming a port, reports nothing
+        // rather than a number a sender would then probe and blame.
+        assert_eq!(hub_port(""), None);
+        assert_eq!(hub_port("http://192.168.0.27"), None);
+        assert_eq!(hub_port("192.168.0.27:7878"), None);
     }
 }

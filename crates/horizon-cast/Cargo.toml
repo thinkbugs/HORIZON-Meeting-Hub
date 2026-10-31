@@ -75,6 +75,9 @@ windows = { version = "0.61", features = [
   "Win32_Graphics_Direct3D",
   "Win32_Graphics_Direct3D11",
   "Win32_Networking_WinSock",
+  # Enumerating the adapters' IPv4 addresses, so SSDP and mDNS can join their
+  # groups on every wire the machine has rather than only the default route.
+  "Win32_NetworkManagement_IpHelper",
   "Win32_Security_Cryptography",
   "Win32_Security_Credentials",
   # SChannel, for the Cast v2 sender's TLS channel (see `cast::tls`).

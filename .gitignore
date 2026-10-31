@@ -9,6 +9,7 @@ src-tauri/gen
 # 本机验证脚本与会话配置（路径绑定本机，不入库）
 .probe
 .qoder
+.tmp-*/
 
 # 本机交付定制（含客户信息）
 /oem/

@@ -101,6 +101,7 @@ fn run(args: &Args) -> Result<(), String> {
         bind: "0.0.0.0".parse().unwrap(),
         port: args.port,
         show_video: args.show_video,
+        video_parent: None,
         advertise: args.advertise,
     })
     .map_err(|e| format!("could not start the renderer: {e}"))?;
@@ -185,6 +186,7 @@ fn selftest() -> Result<(), String> {
         bind: "127.0.0.1".parse().unwrap(),
         port: 0,
         show_video: false,
+        video_parent: None,
         advertise: false,
     })
     .map_err(|e| format!("could not start the renderer: {e}"))?;

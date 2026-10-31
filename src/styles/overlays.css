@@ -2192,21 +2192,93 @@ body.is-streaming .cast-preview__open {
   to { opacity: 1; }
 }
 
+/* Screen area and the queue rail sit side by side in real flex columns: the
+   picture is a native child window positioned from this area's rect, so it
+   cannot overlap the rail and the rail cannot be floated over it. */
+.dlna-stage__body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.dlna-stage__main {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dlna-stage__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dlna-stage__rail-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(120, 160, 200, 0.18);
+  background: rgba(10, 20, 35, 0.6);
+  backdrop-filter: blur(8px);
+  color: rgba(200, 220, 240, 0.8);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.dlna-stage__rail-toggle:hover {
+  background: rgba(20, 40, 60, 0.8);
+  color: rgba(240, 250, 255, 1);
+}
+
+.dlna-stage__rail-toggle.is-on {
+  border-color: rgba(38, 100, 169, 0.55);
+  background: rgba(38, 100, 169, 0.22);
+  color: rgba(225, 242, 255, 0.95);
+}
+
+.dlna-stage__rail-toggle b {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(120, 160, 200, 0.16);
+}
+
+.dlna-stage__count {
+  font-size: 11px;
+  color: rgba(160, 185, 210, 0.55);
+  padding-left: 4px;
+}
+
+.dlna-stage__warn {
+  font-size: 11px;
+  color: rgba(240, 176, 80, 0.85);
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The bar is a real flex row, not an overlay: the video picture is a native
+   child window and DOM stacking cannot keep it under the chrome. */
 .dlna-stage__bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: relative;
+  order: -1;
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 26px 46px;
+  padding: 18px 26px 15px;
   background: linear-gradient(
     180deg,
-    rgba(3, 7, 12, 0.88) 0%,
-    rgba(3, 7, 12, 0.62) 58%,
-    rgba(3, 7, 12, 0) 100%
+    rgba(3, 7, 12, 0.96) 0%,
+    rgba(3, 7, 12, 0.82) 100%
   );
+  border-bottom: 1px solid rgba(120, 160, 200, 0.1);
   z-index: 10;
 }
 
@@ -2254,14 +2326,6 @@ body.is-streaming .cast-preview__open {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
 }
 
-.dlna-stage__time {
-  font-size: 12px;
-  color: rgba(172, 202, 228, 0.52);
-  font-variant-numeric: tabular-nums;
-  font-family: "SF Mono", "Cascadia Code", monospace;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
-}
-
 .dlna-stage__exit {
   display: flex;
   align-items: center;
@@ -2301,7 +2365,7 @@ body.is-streaming .cast-preview__open {
   align-items: center;
   justify-content: center;
   gap: 32px;
-  padding: 80px 40px 60px;
+  padding: 48px 40px 56px;
   background:
     radial-gradient(60% 50% at 50% 50%, rgba(38, 100, 169, 0.08) 0%, transparent 70%),
     radial-gradient(40% 35% at 30% 40%, rgba(109, 93, 190, 0.06) 0%, transparent 60%),
@@ -2311,10 +2375,10 @@ body.is-streaming .cast-preview__open {
 .dlna-music__art {
   position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 280px;
-  height: 280px;
+  gap: 18px;
 }
 
 .dlna-music__disc {
@@ -2373,24 +2437,13 @@ body.is-streaming .cast-preview__open {
   border: 2px solid rgba(38, 100, 169, 0.4);
 }
 
-.dlna-music__visualizer {
-  position: absolute;
-  bottom: -10px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
-  height: 60px;
-}
-
-.dlna-music__bar {
-  width: 4px;
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(180deg, rgba(38, 100, 169, 0.8) 0%, rgba(109, 93, 190, 0.4) 100%);
-  transform-origin: bottom;
-  transition: transform 0.08s ease;
+/* Where the track sits in the list — the queue's own numbers, not a decorative
+   spectrum. A fake analyser would show bars for a stream we never decode here. */
+.dlna-music__position {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: rgba(160, 185, 210, 0.55);
 }
 
 .dlna-music__info {
@@ -2413,34 +2466,6 @@ body.is-streaming .cast-preview__open {
   font-size: 13px;
   color: rgba(160, 185, 210, 0.5);
   margin: 0;
-}
-
-.dlna-music__progress {
-  width: min(90%, 480px);
-}
-
-.dlna-music__progress-bar {
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(60, 80, 100, 0.3);
-  overflow: hidden;
-}
-
-.dlna-music__progress-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, rgba(38, 100, 169, 0.8) 0%, rgba(109, 93, 190, 0.6) 100%);
-  transition: width 0.3s ease;
-}
-
-.dlna-music__progress-times {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 8px;
-  font-size: 12px;
-  color: rgba(160, 185, 210, 0.5);
-  font-variant-numeric: tabular-nums;
-  font-family: "SF Mono", "Cascadia Code", monospace;
 }
 
 /* ── DLNA Video Player ── */
@@ -2468,6 +2493,15 @@ body.is-streaming .cast-preview__open {
   gap: 16px;
   color: rgba(160, 185, 210, 0.6);
   font-size: 14px;
+}
+
+/* A DLNA photo is drawn in the webview (MediaEngine only handles timed media). */
+.dlna-video__photo {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  user-select: none;
 }
 
 .dlna-video__spinner {
@@ -2508,58 +2542,479 @@ body.is-streaming .cast-preview__open {
   font-size: 14px;
 }
 
-.dlna-video__play-icon {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: rgba(38, 100, 169, 0.15);
-  border: 2px solid rgba(38, 100, 169, 0.3);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: rgba(38, 100, 169, 0.7);
-}
-
 .dlna-video__controls {
   padding: 12px 24px 20px;
   background: linear-gradient(0deg, rgba(2, 4, 8, 0.9) 0%, rgba(2, 4, 8, 0.6) 70%, transparent 100%);
 }
 
-.dlna-video__progress-bar {
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(60, 80, 100, 0.3);
-  overflow: hidden;
-  margin-bottom: 12px;
+/* Transport row shared by the video and music stages: the receiver drives its
+   own player so the big screen never waits for the phone. */
+.dlna-transport {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
 }
 
-.dlna-video__progress-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, rgba(38, 100, 169, 0.8) 0%, rgba(109, 93, 190, 0.6) 100%);
+.dlna-music .dlna-transport {
+  width: min(90%, 520px);
+}
+
+.dlna-transport__bar {
+  position: relative;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: rgba(60, 80, 100, 0.35);
+  cursor: pointer;
+  appearance: none;
+}
+
+.dlna-transport__bar:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.dlna-transport__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(38, 100, 169, 0.9) 0%, rgba(109, 93, 190, 0.75) 100%);
   transition: width 0.3s ease;
 }
 
-.dlna-video__controls-row {
+.dlna-transport__row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 16px;
 }
 
-.dlna-video__time {
+.dlna-transport__time {
+  min-width: 104px;
   font-size: 13px;
-  color: rgba(160, 185, 210, 0.6);
+  color: rgba(160, 185, 210, 0.75);
   font-variant-numeric: tabular-nums;
   font-family: "SF Mono", "Cascadia Code", monospace;
 }
 
-.dlna-video__phase-badge {
+.dlna-transport__buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dlna-transport__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(38, 100, 169, 0.28);
+  background: rgba(38, 100, 169, 0.12);
+  color: rgba(200, 224, 250, 0.86);
+  cursor: pointer;
+}
+
+.dlna-transport__button:hover {
+  background: rgba(38, 100, 169, 0.26);
+}
+
+.dlna-transport__button--text {
+  width: auto;
+  padding: 0 12px;
+  border-radius: 17px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dlna-transport__button--main {
+  width: 44px;
+  height: 44px;
+  background: rgba(38, 100, 169, 0.42);
+  border-color: rgba(120, 180, 240, 0.42);
+}
+
+.dlna-transport__volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 12px;
+  color: rgba(160, 185, 210, 0.6);
+}
+
+.dlna-transport__volume input[type="range"] {
+  width: 112px;
+  accent-color: #2664a9;
+}
+
+.dlna-transport__slot {
+  font-style: normal;
+  margin-left: 10px;
   font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 10px;
-  background: rgba(38, 100, 169, 0.15);
-  border: 1px solid rgba(38, 100, 169, 0.25);
-  color: rgba(160, 200, 240, 0.7);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: rgba(160, 185, 210, 0.45);
+}
+
+.dlna-transport__button--mute {
+  width: 30px;
+  height: 30px;
+}
+
+.dlna-transport__button--mute.is-muted {
+  color: rgba(240, 176, 80, 0.9);
+  border-color: rgba(240, 176, 80, 0.35);
+}
+
+/* ── 片库 / 队列 rail ── */
+
+.media-rail {
+  flex: none;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: rgba(4, 9, 16, 0.94);
+  border-left: 1px solid rgba(120, 160, 200, 0.12);
+}
+
+.media-rail__tabs {
+  display: flex;
+  flex: none;
+  border-bottom: 1px solid rgba(120, 160, 200, 0.12);
+}
+
+.media-rail__tabs button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 13px 8px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: rgba(160, 185, 210, 0.6);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.media-rail__tabs button:hover {
+  color: rgba(225, 242, 255, 0.9);
+}
+
+.media-rail__tabs button.is-on {
+  color: rgba(232, 246, 255, 0.98);
+  border-bottom-color: rgba(38, 100, 169, 0.9);
+}
+
+.media-rail__tabs b {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(120, 160, 200, 0.14);
+}
+
+.media-rail__note {
+  margin: 0;
+  padding: 9px 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(240, 200, 140, 0.85);
+  background: rgba(240, 176, 80, 0.08);
+  border-bottom: 1px solid rgba(240, 176, 80, 0.14);
+}
+
+.media-rail__note.is-error {
+  color: rgba(255, 150, 150, 0.9);
+  background: rgba(200, 60, 60, 0.1);
+  border-bottom-color: rgba(200, 60, 60, 0.2);
+}
+
+.media-rail__list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 10px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+}
+
+.media-rail__list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.028);
+}
+
+.media-rail__list li:hover {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.media-rail__list li[draggable="true"] {
+  cursor: grab;
+}
+
+.media-rail__list li.is-current {
+  border-color: rgba(38, 100, 169, 0.62);
+  background: rgba(38, 100, 169, 0.17);
+}
+
+.media-rail__list li.is-drop {
+  border-top-color: rgba(133, 197, 255, 0.85);
+}
+
+.media-rail__list li.is-dragging {
+  opacity: 0.4;
+}
+
+.media-rail__list li.is-picked {
+  border-color: rgba(120, 180, 240, 0.35);
+  background: rgba(38, 100, 169, 0.1);
+}
+
+.media-rail__grip {
+  flex: none;
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: -2px;
+  color: rgba(160, 185, 210, 0.3);
+}
+
+.media-rail__slot {
+  flex: none;
+  width: 20px;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(160, 185, 210, 0.5);
+}
+
+.media-rail__glyph {
+  flex: none;
+  display: flex;
+  color: rgba(170, 200, 230, 0.62);
+}
+
+.media-rail__thumb {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #0b1220;
+}
+
+.media-rail__title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: rgba(232, 244, 255, 0.9);
+  font-size: 12.5px;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+button.media-rail__title {
+  cursor: pointer;
+}
+
+button.media-rail__title:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.media-rail__remote {
+  flex: none;
+  font-style: normal;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(240, 176, 80, 0.18);
+  color: rgba(245, 205, 145, 0.92);
+}
+
+.media-rail__meta {
+  flex: none;
+  font-size: 10.5px;
+  color: rgba(160, 185, 210, 0.45);
+}
+
+.media-rail__ops {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.media-rail__ops button {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 160, 200, 0.16);
+  background: rgba(12, 24, 38, 0.7);
+  color: rgba(190, 215, 240, 0.75);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.media-rail__ops button:hover {
+  border-color: rgba(120, 180, 240, 0.45);
+  color: #fff;
+  background: rgba(38, 100, 169, 0.4);
+}
+
+.media-rail__list input[type="checkbox"] {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  accent-color: #2664a9;
+  cursor: pointer;
+}
+
+.media-rail__modes {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 11px 14px;
+  border-top: 1px solid rgba(120, 160, 200, 0.1);
+  background: rgba(8, 16, 26, 0.6);
+}
+
+.media-rail__modes label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  color: rgba(160, 185, 210, 0.55);
+}
+
+.media-rail__modes select,
+.media-rail__modes input {
+  width: 92px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  border: 1px solid rgba(120, 160, 200, 0.18);
+  background: rgba(10, 20, 34, 0.9);
+  color: rgba(226, 240, 255, 0.9);
+  font-size: 11.5px;
+}
+
+.media-rail__modes input[type="number"] {
+  width: 62px;
+}
+
+.media-rail__count {
+  margin-left: auto;
+  align-self: center;
+  font-size: 11px;
+  color: rgba(160, 185, 210, 0.5);
+}
+
+.media-rail__foot {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 11px 14px;
+  border-top: 1px solid rgba(120, 160, 200, 0.1);
+}
+
+.media-rail__foot button {
+  flex: 1;
+  padding: 8px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 160, 200, 0.18);
+  background: rgba(12, 24, 38, 0.75);
+  color: rgba(206, 226, 246, 0.85);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.media-rail__foot button:hover:not(:disabled) {
+  border-color: rgba(120, 180, 240, 0.45);
+  color: #fff;
+}
+
+.media-rail__foot button.is-primary {
+  background: rgba(38, 100, 169, 0.55);
+  border-color: rgba(120, 180, 240, 0.5);
+  color: rgba(240, 250, 255, 0.98);
+}
+
+.media-rail__foot button.is-quiet {
+  flex: 1.4;
+  color: rgba(226, 160, 160, 0.8);
+}
+
+.media-rail__foot button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.media-rail__url {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 11px 14px;
+  border-top: 1px solid rgba(120, 160, 200, 0.1);
+}
+
+.media-rail__url input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 160, 200, 0.18);
+  background: rgba(10, 20, 34, 0.9);
+  color: rgba(226, 240, 255, 0.9);
+  font-size: 11.5px;
+}
+
+.media-rail__url button {
+  flex: none;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 160, 200, 0.22);
+  background: rgba(12, 24, 38, 0.75);
+  color: rgba(206, 226, 246, 0.85);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.media-rail__url button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.media-rail__empty {
+  padding: 20px 14px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgba(160, 185, 210, 0.5);
 }

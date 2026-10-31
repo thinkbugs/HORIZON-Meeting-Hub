@@ -22,14 +22,22 @@ class WsClient(
         fun onClosed(reason: String)
     }
 
+    /** The receiver answered the upgrade with an HTTP error; retrying cannot help. */
+    class Rejected(message: String) : IOException(message)
+
     @Volatile private var socket: Socket? = null
     @Volatile private var open = false
     private val writeLock = Any()
     private val random = SecureRandom()
 
+    fun isOpen(): Boolean = open
+
     fun connect() {
         val socket = Socket()
         socket.tcpNoDelay = true
+        // A quiet screen produces no frames at all; keepalive keeps the flow
+        // alive across Wi-Fi power saving and any idle timeout in between.
+        socket.keepAlive = true
         socket.connect(InetSocketAddress(host, port), 6000)
 
         val key = ByteArray(16).also(random::nextBytes)
@@ -51,7 +59,7 @@ class WsClient(
         val statusLine = header.lineSequence().firstOrNull().orEmpty()
         if (!statusLine.contains(" 101 ")) {
             socket.close()
-            throw IOException(
+            throw Rejected(
                 when {
                     statusLine.contains("403") -> "投屏码不正确"
                     statusLine.contains("404") -> "接收端没有开启投屏"
@@ -66,9 +74,12 @@ class WsClient(
         Thread({ readLoop(socket, input) }, "ws-read").start()
     }
 
-    fun sendText(text: String) = sendFrame(OP_TEXT, text.toByteArray(Charsets.UTF_8))
+    fun sendText(text: String): Boolean = sendFrame(OP_TEXT, text.toByteArray(Charsets.UTF_8))
 
-    fun sendBinary(payload: ByteArray) = sendFrame(OP_BINARY, payload)
+    fun sendBinary(payload: ByteArray): Boolean = sendFrame(OP_BINARY, payload)
+
+    /** Protocol-level ping; the receiver answers with a pong on the same socket. */
+    fun ping(): Boolean = sendFrame(OP_PING, PING_PAYLOAD)
 
     fun close() {
         open = false
@@ -152,8 +163,8 @@ class WsClient(
         }
     }
 
-    private fun sendFrame(opcode: Int, payload: ByteArray) {
-        val socket = socket ?: return
+    private fun sendFrame(opcode: Int, payload: ByteArray): Boolean {
+        val socket = socket ?: return false
         val mask = ByteArray(4).also(random::nextBytes)
         val header = ByteArrayOutputStream()
         header.write(0x80 or opcode)
@@ -182,8 +193,10 @@ class WsClient(
                 out.flush()
             } catch (_: IOException) {
                 close()
+                return false
             }
         }
+        return true
     }
 
     private companion object {
@@ -194,6 +207,7 @@ class WsClient(
         const val OP_PONG = 0xA
         const val MAX_HEADER = 16 * 1024
         const val MAX_FRAME = 4L * 1024 * 1024
+        val PING_PAYLOAD = "horizon".toByteArray(Charsets.UTF_8)
         val HEADER_END = byteArrayOf(13, 10, 13, 10)
     }
 }

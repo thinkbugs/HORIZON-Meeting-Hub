@@ -141,9 +141,57 @@ class WsClientTest {
         try {
             client.connect()
             fail("403 must not be treated as a session")
-        } catch (error: IOException) {
+        } catch (error: WsClient.Rejected) {
+            // Fatal: the service must not burn retries on a wrong token.
             assertEquals("投屏码不正确", error.message)
         }
+        serverThread.join(3000)
+    }
+
+    @Test
+    fun keepalivePingIsAProtocolControlFrame() {
+        val received = LinkedBlockingQueue<Pair<Int, ByteArray>>()
+        val serverThread = thread {
+            server.accept().use { socket ->
+                val input = BufferedInputStream(socket.getInputStream())
+                readHeader(input)
+                socket.getOutputStream().apply {
+                    write(
+                        (
+                            "HTTP/1.1 101 Switching Protocols\r\n" +
+                                "Upgrade: websocket\r\n" +
+                                "Connection: Upgrade\r\n" +
+                                "Sec-WebSocket-Accept: dGVzdA==\r\n\r\n"
+                            ).toByteArray(),
+                    )
+                    flush()
+                }
+                received.add(readFrame(input))
+                // Answer like the receiver does, then close normally.
+                socket.getOutputStream().apply {
+                    write(byteArrayOf(0x8A.toByte(), 0x00))
+                    flush()
+                }
+                Thread.sleep(50)
+            }
+        }
+        lateinit var client: WsClient
+        val open = CountDownLatch(1)
+        client = WsClient("127.0.0.1", port, "/stream?token=123456", object : WsClient.Listener {
+            override fun onOpen() {
+                open.countDown()
+            }
+
+            override fun onText(text: String) = Unit
+            override fun onClosed(reason: String) = Unit
+        })
+        client.connect()
+        assertTrue(open.await(5, TimeUnit.SECONDS))
+        assertTrue(client.ping())
+        val (opcode, payload) = received.poll(5, TimeUnit.SECONDS) ?: error("no ping arrived")
+        assertEquals(0x9, opcode)
+        assertEquals("horizon", payload.toString(Charsets.UTF_8))
+        client.close()
         serverThread.join(3000)
     }
 

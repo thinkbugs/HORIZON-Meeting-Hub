@@ -34,6 +34,9 @@ fn main() {
             port: args.port,
             name: "HORIZON browser-probe".to_string(),
             token: args.token.clone(),
+            // A probe is not a room: it has no file hub behind it, so it must not
+            // advertise a library port a sender would then fail to reach.
+            hub_port: None,
         },
         sink.clone(),
     )

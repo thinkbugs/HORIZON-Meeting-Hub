@@ -10,7 +10,18 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-data class Receiver(val host: String, val port: Int, val name: String, val legacy: Boolean) {
+/**
+ * One receiver as `/info` describes it. `hub` is the port of the file and media
+ * service on the same desktop — `/info` reports it so a phone never has to
+ * assume 7878, and a legacy receiver that predates `/info` reports nothing.
+ */
+data class Receiver(
+    val host: String,
+    val port: Int,
+    val name: String,
+    val legacy: Boolean,
+    val hub: Int? = null,
+) {
     val address: String get() = "$host:$port"
 }
 
@@ -43,6 +54,25 @@ object Discovery {
         return prefixes.toList()
     }
 
+    /** The phone's own address on the LAN, or null when only loopback exists. */
+    fun localIp(): String? {
+        val interfaces = try {
+            Collections.list(NetworkInterface.getNetworkInterfaces())
+        } catch (_: Exception) {
+            emptyList<NetworkInterface>()
+        }
+        for (iface in interfaces) {
+            if (!iface.isUp || iface.isLoopback) continue
+            for (address in Collections.list(iface.inetAddresses)) {
+                if (address !is Inet4Address || address.isLoopbackAddress) continue
+                val host = address.hostAddress ?: continue
+                if (host.startsWith("169.254.")) continue
+                return host
+            }
+        }
+        return null
+    }
+
     fun candidates(extraHost: String): List<String> {
         val hosts = LinkedHashSet<String>()
         hosts.add("127.0.0.1")
@@ -71,11 +101,13 @@ object Discovery {
                     if (info.optString("service") != "horizon-browser") {
                         null
                     } else {
+                        val hub = info.optInt("hub", 0)
                         Receiver(
                             host = host,
                             port = info.optInt("port", port),
                             name = info.optString("name").ifEmpty { "HORIZON 接收端" },
                             legacy = false,
+                            hub = hub.takeIf { it > 0 },
                         )
                     }
                 }

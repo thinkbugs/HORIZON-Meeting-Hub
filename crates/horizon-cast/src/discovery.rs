@@ -767,6 +767,87 @@ pub fn primary_interface() -> Ipv4Addr {
         .unwrap_or(Ipv4Addr::UNSPECIFIED)
 }
 
+/// Every IPv4 address this machine can receive on, the default route's first.
+///
+/// `primary_interface()` answers "where does traffic leave from", which is not
+/// the question a renderer needs answered: a docked laptop whose hotspot carries
+/// the default route still has controllers on the room network, and a multicast
+/// group joined on one adapter is deaf on the other. Windows delivers a multicast
+/// datagram only to sockets that joined on the interface it arrived on, so
+/// discovering on every wire means joining on every address, which only the
+/// adapter table can list.
+#[cfg(windows)]
+fn interface_addresses() -> Vec<Ipv4Addr> {
+    use windows::Win32::NetworkManagement::IpHelper::{GetAdaptersInfo, IP_ADAPTER_INFO};
+
+    const ERROR_BUFFER_OVERFLOW: u32 = 111;
+    const IF_TYPE_SOFTWARE_LOOPBACK: u32 = 24;
+    let mut found: Vec<Ipv4Addr> = Vec::new();
+    // The API writes one linked list of records into a buffer the caller owns;
+    // the records want 8-byte alignment, so the buffer is u64s.
+    let mut buffer: Vec<u64> = vec![0; 8192 / 8];
+    let mut length = (buffer.len() * 8) as u32;
+    let status =
+        unsafe { GetAdaptersInfo(Some(buffer.as_mut_ptr() as *mut IP_ADAPTER_INFO), &mut length) };
+    if status != 0 {
+        // A first call that only reports "not enough room" hands back the size it
+        // needs; anything else is a machine with no adapters to ask.
+        if status != ERROR_BUFFER_OVERFLOW {
+            return found;
+        }
+        buffer = vec![0; (length as usize + 7) / 8 + 512];
+        length = (buffer.len() * 8) as u32;
+        if unsafe {
+            GetAdaptersInfo(Some(buffer.as_mut_ptr() as *mut IP_ADAPTER_INFO), &mut length)
+        } != 0
+        {
+            return found;
+        }
+    }
+
+    let dotted = |address: &[i8; 16]| -> Option<Ipv4Addr> {
+        // `IP_ADDRESS_STRING` is a NUL-terminated dotted quad, so this reads the
+        // bytes out by hand rather than trusting a fixed length.
+        let bytes = unsafe { std::slice::from_raw_parts(address.as_ptr() as *const u8, 16) };
+        let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+        std::str::from_utf8(&bytes[..end])
+            .ok()
+            .and_then(|text| text.parse::<Ipv4Addr>().ok())
+    };
+
+    let mut adapter = buffer.as_ptr() as *const IP_ADAPTER_INFO;
+    while !adapter.is_null() {
+        let info = unsafe { &*adapter };
+        if info.Type != IF_TYPE_SOFTWARE_LOOPBACK {
+            let mut row = std::ptr::addr_of!(info.IpAddressList);
+            while !row.is_null() {
+                let entry = unsafe { &*row };
+                if let Some(address) = dotted(&entry.IpAddress.String) {
+                    if !found.contains(&address) {
+                        found.push(address);
+                    }
+                }
+                row = entry.Next;
+            }
+        }
+        adapter = info.Next;
+    }
+
+    // The default route's address leads: it is the one outbound announcements and
+    // replies leave from, and `multicast_socket` keeps only that join mandatory.
+    let primary = primary_interface();
+    if let Some(position) = found.iter().position(|ip| *ip == primary) {
+        let address = found.remove(position);
+        found.insert(0, address);
+    }
+    found
+}
+
+#[cfg(not(windows))]
+fn interface_addresses() -> Vec<Ipv4Addr> {
+    vec![primary_interface()]
+}
+
 pub(crate) fn multicast_socket(port: u16, group: Ipv4Addr, ttl: u32) -> CastResult<UdpSocket> {
     let sock = socket2::Socket::new(
         socket2::Domain::IPV4,
@@ -779,12 +860,27 @@ pub(crate) fn multicast_socket(port: u16, group: Ipv4Addr, ttl: u32) -> CastResu
     sock.set_reuse_address(true).map_err(|_| CastError::Io)?;
     sock.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)).into())
         .map_err(|_| CastError::Io)?;
-    let interface = primary_interface();
-    sock.join_multicast_v4(&group, &interface)
-        .map_err(|_| CastError::Io)?;
+    // Which interface the join happens on decides what arrives, so a machine with
+    // more than one wire asks for the group on every IPv4 address it owns. The
+    // primary is first and its failure is the only one that can fail the socket:
+    // it is the one the routing table picked, and an adapter that has lost its
+    // address between the enumeration and the join is not worth killing discovery
+    // over.
+    let mut interfaces = interface_addresses();
+    if interfaces.is_empty() {
+        interfaces.push(primary_interface());
+    }
+    let primary = interfaces[0];
+    for (index, interface) in interfaces.iter().enumerate() {
+        if index > 0 {
+            let _ = sock.join_multicast_v4(&group, interface);
+        } else if sock.join_multicast_v4(&group, interface).is_err() {
+            return Err(CastError::Io);
+        }
+    }
     // Joining on an interface decides what arrives; this decides what leaves.
-    if !interface.is_unspecified() {
-        sock.set_multicast_if_v4(&interface)
+    if !primary.is_unspecified() {
+        sock.set_multicast_if_v4(&primary)
             .map_err(|_| CastError::Io)?;
     }
     sock.set_multicast_ttl_v4(ttl).map_err(|_| CastError::Io)?;
@@ -1078,6 +1174,25 @@ fn unescape(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The adapter walk has to find at least the interface the routing table
+    /// picked, and put it first: `multicast_socket` treats only that join as
+    /// mandatory, so an enumeration that lost the primary would silently narrow
+    /// discovery back down to one wire.
+    #[cfg(windows)]
+    #[test]
+    fn every_wire_this_machine_can_receive_on_is_listed() {
+        let listed = interface_addresses();
+        assert!(!listed.is_empty(), "一台能联网的机器至少有一张可组播的网卡");
+        let primary = primary_interface();
+        if !primary.is_unspecified() {
+            assert_eq!(
+                listed[0], primary,
+                "默认路由的地址必须排在最前，实到列表={listed:?}"
+            );
+            assert!(listed.contains(&primary));
+        }
+    }
 
     fn push_name(out: &mut Vec<u8>, name: &str) {
         encode_name(out, name).unwrap();

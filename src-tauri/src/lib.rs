@@ -1,5 +1,6 @@
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -7,6 +8,9 @@ use serde::Serialize;
 use tauri::Manager;
 
 mod firewall;
+mod media_http;
+mod media_library;
+mod media_stage;
 mod receivers;
 mod sender;
 mod snapdrop_server;
@@ -801,8 +805,24 @@ fn open_extension_folder(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 use std::sync::OnceLock;
+static MEDIA_RUNTIME: OnceLock<Arc<media_stage::MediaRuntime>> = OnceLock::new();
 static SNAPDROP_CONFIG: OnceLock<snapdrop_server::ConfigStore> = OnceLock::new();
 static SNAPDROP_URL: OnceLock<String> = OnceLock::new();
+
+/// The shared media runtime: one library, one stage, one player. Created on
+/// first use so the receiver commands and the SnapDrop server see the same
+/// objects — two decoders for one room would be two pictures fighting.
+fn media_runtime(app: &tauri::AppHandle) -> Arc<media_stage::MediaRuntime> {
+    Arc::clone(MEDIA_RUNTIME.get_or_init(|| {
+        // Parent the video surface to the main window so DLNA/AirPlay pictures
+        // sit inside the launcher instead of popping a top-level window.
+        let video_parent = app
+            .get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|hwnd| hwnd.0 as isize);
+        Arc::new(media_stage::MediaRuntime::start(video_parent))
+    }))
+}
 
 /// The SnapDrop page is a folder of static files, not something Vite bundles.
 /// Installed builds carry it as a resource; dev builds read the source tree.
@@ -838,10 +858,17 @@ async fn start_snapdrop_server(app: tauri::AppHandle, port: u16) -> Result<Strin
         return Ok(url.clone());
     }
     let assets = snapdrop_assets(&app)?;
-    let started = snapdrop_server::start_snapdrop_server(port, assets, app.clone()).await?;
+    let runtime = media_runtime(&app);
+    let started = snapdrop_server::start_snapdrop_server(port, assets, app.clone(), runtime).await?;
     let _ = SNAPDROP_CONFIG.set(started.config);
     let _ = SNAPDROP_URL.set(started.url.clone());
     Ok(started.url)
+}
+
+#[tauri::command]
+fn media_invoke(app: tauri::AppHandle, action: String, args: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    let runtime = media_runtime(&app);
+    runtime.stage.invoke(&action, args.as_ref().unwrap_or(&serde_json::Value::Null))
 }
 
 fn snapdrop_config_store() -> Result<snapdrop_server::ConfigStore, String> {
@@ -1482,6 +1509,7 @@ pub fn run() {
             miracast_status,
             miracast_launch,
             open_extension_folder,
+            media_invoke,
             start_snapdrop_server,
             set_snapdrop_device_name,
             set_snapdrop_storage_dir,

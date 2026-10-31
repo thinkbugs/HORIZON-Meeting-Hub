@@ -169,3 +169,132 @@ Windows 11 的截图工具有录屏，Windows 10 没有；Win10 的录屏在 Xbo
 | 关键文件 | `README.md`、`src/App.tsx`、`src-tauri/src/lib.rs`、`src-tauri/tauri.conf.json`、`crates/horizon-cast/src/airplay/fairplay.rs`、`extension/manifest.json`、`docs/verification-2026-10-30.md`、`docs/shots/file-transfer-firewall-2026-10-30.png` 全部命中 |
 | 忽略项 | `.probe/`、`oem/`、`node_modules/`、`dist/`、`target/`、`.qoder/` 命中 0 条 |
 | 仓库页 | `https://github.com/thinkbugs/HORIZON-Meeting-Hub` HTTP 200 |
+
+## 8. DLNA 大屏舞台：播放面几何、变形、可控性与控制面可靠性
+
+验证对象：开发态 `target\debug\horizon-launcher.exe`（`npm run desktop`，Rust 改动由 watcher 自动重建，前端改动即时热更新）。接收端由应用自身的 `dlna_start` 启动，端口每次不同（本轮 `57963`），控制器用 `tools/dlna-cast.mjs` 与临时探针脚本。
+
+### 8.1 缺陷与对应改动
+
+| 现象 | 根因 | 改动 |
+| --- | --- | --- |
+| 播放标题栏 / 退出按钮被画面盖住 | 视频面是 Tauri 窗口的**原生子窗口**（类 `HorizonCastPlayer`，style `0x54000000`），DOM 的 z 序压不住它 | `src/styles/overlays.css` 把 `.dlna-stage__bar` 改成真实 flex 行（`order:-1; flex:none`），画面区 `.dlna-video__screen` 因此整体下移，几何上不可能再压住 chrome |
+| 画面区顶部与 chrome 重叠 | 同上 | 实测画面区矩形由 `0,0,1919,940` 变为 `0,67,1919,873` |
+| 拉伸后内容变形 | 引擎尚未报出视频尺寸时按舞台铺满 | `crates/horizon-cast/src/player.rs` 的 `place_surface`：无尺寸时 `SW_HIDE` 并撤销上一次矩形，等 pump 每 tick 重试 |
+| 标题栏时间重复出现 | 播放行已有时间 | 删除 `.dlna-stage__time`（DOM 与样式一并移除） |
+| 音乐投屏只有一片白 | 无音乐界面 | `.dlna-music`：唱片、频谱条、标题、设备、进度、−10/播放暂停/+10/停止、音量 |
+| SOAP 响应偶发连接重置 | 见 8.4 | 响应单段写出；写完发 FIN，再在 linger 表里排空读缓冲，收到对端 FIN 或硬错误即刻关闭，300 ms 超时兜底 |
+| 图片投屏在大屏上不显示 | 静帧由前端 `<img>` 画，`src` 是控制器给的外链 `http://…/photo.jpg`，被 CSP 拦掉 | `src-tauri/tauri.conf.json` 只放开 `img-src … http:`（`script-src`/`connect-src` 未动）。DLNA 的媒体地址按协议就是任意 http URL，收窄到具体网段需要另做 asset 代理，本轮没有做 |
+
+### 8.2 播放面几何实测（EnumWindows / EnumChildWindows，客户区坐标）
+
+舞台画面区 `[0, 67, 1919, 873]`（`devicePixelRatio=1`）。同一舞台、同一画面区，投两种不同宽高比的源：
+
+| 片源 | 宽高比 | 播放面尺寸 | 左上角（相对客户区） | 判定 |
+| --- | --- | --- | --- | --- |
+| `border5.mp4` | 16:9 | `1552x873`（1.7778） | `(184, 67)` | 高度受限、左右黑边、水平居中 `(1919−1552)/2=183.5` |
+| `square.mp4`（本轮生成） | 4:3 | `1164x873`（1.3333） | `(378, 67)` | 同上，`(1919−1164)/2=377.5` |
+| 真机投放 `mmexport1786838896124.mp4`（手机 192.168.0.37，5:12） | 9:16 | `491x873`（0.5624） | `(714, 67)` | 宽度受限、上下无裁切、水平居中 `(1919−491)/2=714` |
+
+三行的 top 都是 `67`，即画面永远起在标题栏下沿；实测比值与三种源片宽高比逐一吻合（1.7778 / 1.3333 / 0.5624 ≈ 9:16 的 0.5625），说明「拉伸变形」不再可能——矩形是按 `GetNativeVideoSize` 做等比适配算出来的。播放结束后（`phase=ended`）播放面 `vis=False`、style 变 `0x44000000`，隐藏路径同样成立。
+
+### 8.3 大屏侧可控性（点击真实 DOM 按钮，读 `receiver_status`）
+
+| 操作（`.dlna-stage button[aria-label]`） | 状态变化 |
+| --- | --- |
+| 起始 | `playing 1.6` |
+| 暂停 | `paused` |
+| 播放 | `playing 2.8` |
+| 后退 10 秒 | `0.6` |
+| 前进 10 秒 | `10.7` |
+| 进度条拖到 50%（`input[type=range]`，`duration=300`） | `11.9`（钳制在当前位置 +10 内，见「已知限制」） |
+| 停止投放 | `stopped` |
+
+音频链路：投 `tone.mp3` 后 `phase=playing duration=90.07`，`.dlna-music` 存在、标题为 `tone`，界面截图 `docs/shots/dlna-stage-music.png`。
+
+真机端到端：手机（192.168.0.37）经系统 DLNA 投放 `mmexport1786838896124.mp4`，大屏侧自动进入舞台，标题栏显示「正在播放 mmexport1786838896124」+ 退出按钮、底部完整播控条（进度、0:39/5:12、−10、暂停、+10、停止、音量）全部可见可用，截图 `docs/shots/dlna-stage-video.png`（整屏真实抓取，含原生播放面）。
+
+### 8.4 控制面重置：数字与归因
+
+| 形态 | 结果 |
+| --- | --- |
+| 同进程顺序 SOAP（4 动作 × 8 轮 = 32 次） | 0 失败 |
+| 同进程完整投放（描述 GET + 3 动作，12 轮） | 11/12 全绿；1 次描述 GET 断连（`UND_ERR_SOCKET`），同轮后续 3 个动作仍 200 |
+| 新进程单请求，本机自连（fetch / node:http / 裸 socket，各 25 次） | fetch 6–11 失败、node:http 3–4 失败、裸 socket 1–2 失败 |
+| 同样「新进程单请求」打 node 自建 HTTP 服务（同机、同 `Connection: close`、同主动关闭） | 0/40 失败 |
+
+服务端 trace（`HORIZON_DLNA_TRACE=1`，逐连接打印 accept / 请求行 / FIN / 关闭原因）显示：**每一次客户端重置都对应一次「accept 成功但一个字节请求都没读到」的连接**，两者 1:1；失败的连接在 `netstat` 里不留 TIME_WAIT，成功的都留。
+
+逐个排除的变量（每次只改一个，测后回滚无收益的改动）：
+
+| 变量 | 试验 | 结果 |
+| --- | --- | --- |
+| 响应分多段写出 | 合并为单段 | 修复了「响应写一半连接就断」这一类，投放从 4/10 失败到 11/12 |
+| 关闭时不排空收缓冲 | 加 linger 表：FIN 后排空、见对端 FIN 或硬错误即关 | 保留（无排空的关闭会把响应一起毁掉） |
+| accept 轮询间隔 | 20 ms → 2 ms（忙时） | 无变化，已回滚 |
+| 谁先关（把 TIME_WAIT 挪到客户端） | 写完不发 FIN，等对端先关 | fetch 反而恶化到 14/25，已回滚 |
+| 系统代理 / Clash | 客户端与服务端同机、`127.0.0.1` 与局域网 IP 都复现 | 与本问题无关 |
+
+结论（诚实版）：残留失败只在「每个请求一个新进程 + 同一台机器自连」这种合成形态下复现，三种客户端都会遇到，指向 Windows 本机端口复用与四元组碰撞；真实控制器是长驻进程、顺序发多个动作，该形态 0/32 未见失败。本轮把**服务端能负责的部分**（响应完整性、关闭排空、积压一次性接完）都修掉了，未定位到剩余差异，未继续以猜测改代码。复现工具：`cargo test -p horizon-cast --lib -- --nocapture --ignored control_plane_stress_listener`（带 trace 的独立接收端）。
+
+### 8.5 本轮已知限制
+
+- 像素级截图分两种：CDP 抓取只含 DOM，原生播放面不入镜；`Graphics.CopyFromScreen` 在会话锁屏 / 显示关闭时返回全白，所以那一段时间的判定靠**矩形与样式位**。本轮晚些时候会话回到前台，`CopyFromScreen` 已能抓到完整画面（`docs/shots/dlna-stage-video.png` 即真机投放的整屏实抓），两种手段现在都可用。
+- 进度条拖拽到 50% 只走到 11.9 s：`dlna_control{Seek}` 走的是同一条 `Transport::seek`，−10/+10 已证明通路正确；大跨度跳转受 MediaEngine 关键帧位置影响，未在本轮单独定位。
+- 追记（节点 6）：上面这句里的 `dlna_control` 门已于节点 6 移除，控制统一走 `media_invoke`；`11.9 s` 是当时的测量，保留原文不改写，但它描述的那条通道现在已经不存在了。
+- 手机侧仍未验证：ADB 不可达（无线调试未开，`adb connect` 10061 拒绝），#103 输入框聚焦、#104 端到端延迟与 1080p30 长跑、#107 桌面图标真机确认三项挂起。
+
+## 9. 「启动器挡住本地应用」：让位逻辑的收口与复验
+
+§8 的实屏抓取顺带把 #105 的让位逻辑重新查了一遍，查出一个真实缺口。
+
+### 9.1 缺口
+
+置顶带只在 `launch_path`（自定义应用）这一条路上主动放下，其余启动入口都是直接
+`shell_open`，也就是只靠 `Focused(false)` 事件被动放下：
+
+| 入口 | 改动前 |
+| --- | --- |
+| `launch_path`（自定义应用、Office、批注应用） | 启动前主动 `set_always_on_top(false)`，失败再补回 |
+| `open_builtin`（文件、浏览器、记事本、截图/录屏、投影设置） | 无，只靠焦点事件 |
+| `run_builtin_steps`（按 Win10/11 版本回退的多步启动） | 无，只靠焦点事件 |
+| `miracast_launch`（系统无线投屏 / 投影设置页） | 无，只靠焦点事件 |
+| `open_extension_folder`（打开浏览器扩展目录） | 无，只靠焦点事件 |
+
+被动路径的问题正是用户看到的现象：新窗口如果在置顶带还挂着的时候才起来，Windows
+的前台锁会不让它拿到前台，于是启动器收不到 `Focused(false)`，带子一直压着，应用开在
+启动器后面。
+
+### 9.2 改动
+
+把让位收进唯一的出口 `shell_open_yielded(app, target, args)`：先放带，再 `ShellExecuteW`，
+启动失败立刻 `sync_topmost` 把带补回去（这种情形下焦点没走，没人会替它恢复）。
+上表四个裸调用点全部改走这个出口。静态核对：`grep -n "shell_open(" src-tauri/src/lib.rs`
+在包装函数之外命中 0 处。
+
+### 9.3 实屏复验做到哪一步
+
+| 测到的 | 数值 |
+| --- | --- |
+| 启动器全屏 + 聚焦时确实会进置顶带 | `WS_EX_TOPMOST=1`、`fg=True`、rect `[0,0]-[1920,1080]` |
+| 经产品自身命令打开文件管理器 | `open_builtin{action:"files"}` → `ok:null` |
+| 新窗口没有被压在启动器下面 | 新 `CabinetWClass` 在 Z 序第 44 位，启动器第 46 位（`EnumWindows` 自顶向下） |
+
+没测到的（不猜）：**「带子开着 → 启动 → 带子在焦点转移之前就被应用自己放下」这一条判据
+没有拿到**。两个原因——
+
+1. 手动 `SetWindowLong` 造出来的带子和 tao 内部缓存的置顶状态不同步，应用随后的
+   `set_always_on_top(false)` 会被当成「本来就是关的」而跳过，这样测出来的「没放下」
+   是测量手段的假象，不是产品行为；
+2. 这台桌面当时正在被使用（另一个浏览器多次抢走前台），带子撑不过一次启动。
+
+所以 #105 的收口改动按**代码路径 + 静态核对**成立，按**端到端判据**尚未闭环，需要在大屏
+无人使用时把启动器切进全屏、再从界面点一次「文件」/「记事本」补测。
+
+### 9.4 产物重建
+
+§8 与 §9 的 Rust / CSS / CSP 改动全部进包：`cargo test -p horizon-cast --lib` 184 passed /
+0 failed / 6 ignored；`npx tauri build` 于 19:46 产出
+`target\release\horizon-launcher.exe`（6,612,992 B）与
+`target\release\bundle\nsis\HORIZON Meeting_0.5.1_x64-setup.exe`（4,569,047 B，4.36 MiB），
+编译告警只剩 `fairplay.rs` 里既有的 7 条括号冗余。

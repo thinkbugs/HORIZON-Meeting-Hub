@@ -66,6 +66,16 @@ pub struct BrowserMirrorConfig {
     pub name: String,
     /// When set, the WebSocket URL must carry the same `?token=`.
     pub token: Option<String>,
+    /// The port the file-transfer hub and media library are served on, when they
+    /// are up.
+    ///
+    /// `GET /info` is the one address a sender already has, so it is the only
+    /// honest place to publish the rest of the room's ports from: a sender that
+    /// guessed 7878 would be guessing at a port the operator can change. Left
+    /// `None` when the hub never bound, and the reply then simply has no `hub`
+    /// field — the sender says 「该接收端没有开启片库服务」 rather than probing a
+    /// port that may belong to something else.
+    pub hub_port: Option<u16>,
 }
 
 impl Default for BrowserMirrorConfig {
@@ -75,6 +85,7 @@ impl Default for BrowserMirrorConfig {
             port: BROWSER_MIRROR_PORT,
             name: "HORIZON".to_string(),
             token: None,
+            hub_port: None,
         }
     }
 }
@@ -234,21 +245,12 @@ fn accept_loop(
                 // mode; the session thread wants blocking reads with a timeout.
                 let _ = stream.set_nonblocking(false);
                 let _ = stream.set_nodelay(true);
-                let launched = stream.try_clone().ok().map(|clone| {
-                    if let Ok(mut slot) = active.lock() {
-                        if let Some(old) = slot.replace(clone) {
-                            let _ = old.shutdown(Shutdown::Both);
-                        }
-                    }
-                });
-                if launched.is_none() {
-                    continue;
-                }
 
                 let session_stats = Arc::clone(&stats);
                 let session_sink = Arc::clone(&sink);
                 let session_config = config.clone();
                 let session_keyframe = Arc::clone(&keyframe);
+                let session_active = Arc::clone(&active);
                 thread::Builder::new()
                     .name("browser-mirror-session".to_string())
                     .spawn(move || {
@@ -259,6 +261,7 @@ fn accept_loop(
                             session_stats,
                             session_keyframe,
                             session_sink,
+                            session_active,
                         )
                     })
                     .ok();
@@ -278,6 +281,7 @@ fn session(
     stats: Arc<BrowserMirrorStats>,
     pending_keyframe: Arc<AtomicBool>,
     sink: Arc<dyn FrameSink>,
+    active: Arc<Mutex<Option<TcpStream>>>,
 ) {
     let id = stats.next_connection.fetch_add(1, Ordering::Relaxed) + 1;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(8)));
@@ -299,6 +303,19 @@ fn session(
         let _ = stream.shutdown(Shutdown::Both);
         return;
     };
+    // Getting here means the sender passed the token check, and only a real screen
+    // may take the room over. The eviction used to happen on `accept()`, before any
+    // request was read: the extension's own discovery sweep holds 48 connections
+    // open at once, so a LAN scan of `/info` shut down the live mirror between the
+    // connect and the handshake. Measured on this machine — 48 parallel `/info`
+    // probes answered 1 and killed 47 with a network error.
+    if let Ok(clone) = stream.try_clone() {
+        if let Ok(mut slot) = active.lock() {
+            if let Some(old) = slot.replace(clone) {
+                let _ = old.shutdown(Shutdown::Both);
+            }
+        }
+    }
     if stream.write_all(&reply).is_err() || stream.flush().is_err() {
         return;
     }
@@ -498,15 +515,21 @@ const CORS_PREFLIGHT: &str = "HTTP/1.1 204 No Content\r\n\
          Connection: close\r\n\r\n";
 
 fn info_reply(config: &BrowserMirrorConfig) -> String {
-    let body = json!({
+    let mut body = json!({
         "service": "horizon-browser",
         "name": config.name,
         "port": config.port,
         "path": "/stream",
         // Whether the sender has to type the code shown on the big screen.
         "paired": config.token.is_some(),
-    })
-    .to_string();
+    });
+    if let Some(hub) = config.hub_port {
+        body["hub"] = serde_json::Value::from(hub);
+    }
+    // The length header is in bytes, and the device name is free text a room may
+    // have set to Chinese: `body.len()` would count UTF-16 code units in JS terms
+    // and under-report here, truncating the reply at the boundary.
+    let body = body.to_string();
     format!(
         "HTTP/1.1 200 OK\r\n\
          Content-Type: application/json\r\n\
@@ -937,6 +960,43 @@ mod tests {
         assert!(reply.contains("Access-Control-Allow-Origin: *"));
         assert!(reply.contains("\"paired\":true"));
         assert!(!reply.contains("204815"));
+        assert!(
+            !reply.contains("\"hub\""),
+            "a receiver whose hub never bound must not advertise a port"
+        );
+    }
+
+    /// The sender reaches the library through this one reply, so the port it
+    /// carries has to be the port the hub actually bound.
+    #[test]
+    fn the_info_probe_publishes_the_hub_port_and_keeps_the_body_length_honest() {
+        let config = BrowserMirrorConfig {
+            name: "戎耀会".to_string(),
+            token: Some("204815".to_string()),
+            hub_port: Some(7878),
+            ..BrowserMirrorConfig::default()
+        };
+        let FirstResponse::Close(reply) = http_reply("GET /info HTTP/1.1\r\nHost: x\r\n", &config)
+        else {
+            panic!("a discovery probe must not become a websocket session");
+        };
+        assert!(reply.contains("\"hub\":7878"), "{reply}");
+        assert!(!reply.contains("204815"), "the code stays out of discovery");
+
+        // A Chinese device name is multi-byte: the header has to count bytes, or
+        // a sender would read a truncated body and lose the `hub` field.
+        let declared: usize = reply
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("Content-Length:")
+                    .and_then(|rest| rest.trim().parse().ok())
+            })
+            .expect("a length header");
+        let body = reply.split("\r\n\r\n").nth(1).expect("a body");
+        assert_eq!(declared, body.len(), "{body}");
+        let parsed: serde_json::Value = serde_json::from_str(body).expect("valid json");
+        assert_eq!(parsed["name"], "戎耀会");
+        assert_eq!(parsed["hub"], 7878);
     }
 
     #[test]
@@ -951,6 +1011,207 @@ mod tests {
         assert!(reply.starts_with("HTTP/1.1 204 No Content"));
         assert!(reply.contains("Access-Control-Allow-Private-Network: true"));
         assert!(reply.contains("Access-Control-Allow-Methods: GET, OPTIONS"));
+    }
+
+    /// Drops whatever it is given: these tests assert on the socket, not on a
+    /// picture.
+    struct ProbeOnlySink;
+
+    impl FrameSink for ProbeOnlySink {
+        fn on_frame(&self, _frame: VideoFrame) {}
+    }
+
+    /// Port 0 lets the OS pick, so a sweep test never races the real 9407.
+    fn sweep_receiver() -> BrowserMirrorReceiver {
+        BrowserMirrorReceiver::start(
+            BrowserMirrorConfig {
+                address: Ipv4Addr::LOCALHOST,
+                port: 0,
+                name: "扫描测试".to_string(),
+                token: Some("246810".to_string()),
+                hub_port: Some(7878),
+            },
+            Arc::new(ProbeOnlySink),
+        )
+        .expect("receiver bound")
+    }
+
+    /// Everything the receiver answers before it hangs up.
+    fn read_reply(stream: &mut TcpStream) -> String {
+        let mut text = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while let Ok(read) = stream.read(&mut chunk) {
+            if read == 0 {
+                break;
+            }
+            text.extend_from_slice(&chunk[..read]);
+        }
+        String::from_utf8_lossy(&text).into_owned()
+    }
+
+    /// Consumed one byte at a time up to the header terminator, so the tail of a
+    /// reply never looks like the first bytes of the next read.
+    fn read_reply_head(stream: &mut TcpStream) -> String {
+        let mut text = Vec::new();
+        let mut byte = [0u8; 1];
+        while stream.read(&mut byte).unwrap_or(0) == 1 {
+            text.push(byte[0]);
+            if text.ends_with(b"\r\n\r\n") {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&text).into_owned()
+    }
+
+    fn upgrade_request(token: &str) -> String {
+        format!(
+            "GET /stream?token={token} HTTP/1.1\r\n\
+             Host: 127.0.0.1:9407\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+             Sec-WebSocket-Version: 13\r\n\r\n"
+        )
+    }
+
+    #[test]
+    fn a_discovery_sweep_answers_every_probe_it_hits() {
+        let receiver = sweep_receiver();
+        let port = receiver.port();
+        // An extension scanning its subnet holds every probe open at once; 48 is
+        // the width the stub harness measured against 9407 and the hub's 7878.
+        let probes: Vec<_> = (0..48)
+            .map(|_| {
+                thread::Builder::new()
+                    .spawn(move || {
+                        let mut stream =
+                            TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                                .or_else(|_| {
+                                    thread::sleep(Duration::from_millis(50));
+                                    TcpStream::connect((Ipv4Addr::LOCALHOST, port))
+                                })
+                                .ok()?;
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(5)))
+                            .ok()?;
+                        stream
+                            .write_all(b"GET /info HTTP/1.1\r\nHost: x\r\n\r\n")
+                            .ok()?;
+                        Some(read_reply(&mut stream))
+                    })
+                    .expect("probe thread")
+            })
+            .collect();
+
+        let replies: Vec<String> = probes
+            .into_iter()
+            .map(|probe| {
+                probe
+                    .join()
+                    .expect("no probe may panic")
+                    .expect("every probe reached the receiver")
+            })
+            .collect();
+
+        assert_eq!(
+            replies.len(),
+            48,
+            "a sweep must not answer itself with a refusal"
+        );
+        for reply in &replies {
+            assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+            assert!(
+                reply.contains("\"hub\":7878"),
+                "a truncated reply loses the hub port the sender needs: {reply}"
+            );
+        }
+        receiver.stop();
+    }
+
+    /// A sender that passed the token check and now holds the room.
+    fn live_screen(port: u16, token: &str) -> TcpStream {
+        let mut screen = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("connect");
+        screen
+            .write_all(upgrade_request(token).as_bytes())
+            .expect("upgrade request");
+        assert!(
+            read_reply_head(&mut screen).starts_with("HTTP/1.1 101"),
+            "the sender must get the websocket it asked for"
+        );
+        screen
+    }
+
+    /// A live session that is merely idle receives nothing — the server only
+    /// writes a pong when the client pings — so a read that is still timing out
+    /// is the proof the socket was never kicked. A reset or a clean close would
+    /// answer with an error or zero bytes here instead.
+    fn assert_still_streaming(screen: &mut TcpStream, receiver: &BrowserMirrorReceiver) {
+        screen
+            .set_read_timeout(Some(Duration::from_millis(1500)))
+            .expect("read timeout");
+        let mut quiet = [0u8; 64];
+        let read = screen.read(&mut quiet);
+        let outcome = format!(
+            "{:?}",
+            read.as_ref().map_err(|error| (error.kind(), error.to_string()))
+        );
+        assert!(
+            matches!(
+                &read,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    )
+            ),
+            "the live screen was disturbed: {outcome} / {:?}",
+            receiver.status()
+        );
+    }
+
+    /// A probe answered `Close` must not reach the hand-over at all.
+    fn probe(port: u16, request: &str) -> String {
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("probe connect");
+        stream
+            .write_all(request.as_bytes())
+            .expect("probe request");
+        read_reply(&mut stream)
+    }
+
+    #[test]
+    fn a_probe_leaves_the_screen_that_is_streaming_alone() {
+        let receiver = sweep_receiver();
+        let port = receiver.port();
+        let mut screen = live_screen(port, "246810");
+
+        // This is what a second device, or the live sender's own next sweep,
+        // sends while the room is taken. It used to shut the session down between
+        // the connect and the handshake.
+        for _ in 0..8 {
+            let reply = probe(port, "GET /info HTTP/1.1\r\nHost: x\r\n\r\n");
+            assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
+        }
+
+        assert_still_streaming(&mut screen, &receiver);
+        receiver.stop();
+    }
+
+    /// The hand-over is what makes an uninvited connection dangerous, so it is
+    /// gated on the same check as the session: a sender that guessed the wrong
+    /// code learns it is not wanted without costing the room its picture.
+    #[test]
+    fn a_sender_with_the_wrong_code_cannot_take_over_a_live_screen() {
+        let receiver = sweep_receiver();
+        let port = receiver.port();
+        let mut screen = live_screen(port, "246810");
+
+        assert!(
+            probe(port, &upgrade_request("000000")).starts_with("HTTP/1.1 403"),
+            "a wrong code is still a refusal"
+        );
+
+        assert_still_streaming(&mut screen, &receiver);
+        receiver.stop();
     }
 
     fn masked_frame(opcode: u8, payload: &[u8]) -> Vec<u8> {

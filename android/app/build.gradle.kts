@@ -11,8 +11,8 @@ android {
         applicationId = "com.horizon.castsender"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 9
+        versionName = "0.5.1"
     }
 
     buildTypes {
@@ -47,8 +47,8 @@ dependencies {
 }
 
 tasks.withType<Test>().configureEach {
-    // ReceiverLiveTest reads these; without them it skips itself.
-    listOf("horizonHost", "horizonPort", "horizonToken", "horizonH264", "horizonSize").forEach { key ->
+    // ReceiverLiveTest and HubMediaLiveTest read these; without them they skip.
+    listOf("horizonHost", "horizonPort", "horizonToken", "horizonH264", "horizonSize", "horizonHub").forEach { key ->
         (project.findProperty(key) as String?)?.let { systemProperty(key, it) }
     }
 }

@@ -89,6 +89,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::discovery::{multicast_socket, primary_interface, SSDP_GROUP, SSDP_PORT};
 use crate::error::{CastError, CastResult};
 use crate::player::{PlaybackState, Phase, Transport};
+use crate::queue::{MediaKind, Track};
 
 pub const DEVICE_TYPE: &str = "urn:schemas-upnp-org:device:MediaRenderer:1";
 pub const AVT: &str = "AVTransport";
@@ -145,6 +146,10 @@ pub struct DmrConfig {
     pub port: u16,
     /// Show a window when a source is loaded. Audio plays either way.
     pub show_video: bool,
+    /// Optional parent window for the video surface. The launcher passes its
+    /// own HWND so the picture is a child of the stage rather than a top-level
+    /// window that a fullscreen launcher would cover.
+    pub video_parent: Option<isize>,
     /// Join SSDP and announce. Tests turn this off to stay off the network.
     pub advertise: bool,
 }
@@ -156,6 +161,7 @@ impl Default for DmrConfig {
             bind: Ipv4Addr::UNSPECIFIED,
             port: 0,
             show_video: true,
+            video_parent: None,
             advertise: true,
         }
     }
@@ -191,8 +197,9 @@ impl Dmr {
     /// Start the renderer with the MediaEngine player.
     #[cfg(windows)]
     pub fn start(config: DmrConfig) -> CastResult<Self> {
-        let transport = Arc::new(crate::player::MediaEngineTransport::start(
+        let transport = Arc::new(crate::player::MediaEngineTransport::start_with(
             config.show_video,
+            config.video_parent,
         )?);
         Self::start_with(config, transport)
     }
@@ -342,6 +349,12 @@ struct Server {
     last_event: Option<EventKey>,
     last_event_at: Instant,
     bootid: u32,
+    /// Replies whose sockets have sent their FIN and are waiting for the
+    /// client to finish the teardown. Closing before that last packet lands is
+    /// what makes a controller read a reset instead of its answer, but waiting
+    /// for it on this thread would stall whoever connects next, so the socket
+    /// is parked here and retired between ticks.
+    lingering: Vec<(TcpStream, Instant)>,
 }
 
 impl Server {
@@ -368,6 +381,7 @@ impl Server {
             last_event: None,
             last_event_at: Instant::now(),
             bootid,
+            lingering: Vec::new(),
         }
     }
 
@@ -377,14 +391,26 @@ impl Server {
             let now = Instant::now();
             self.drain_ssdp(now);
             self.send_pending(now);
+            self.retire_lingering(now);
             if now >= self.next_alive {
                 self.notify_all("ssdp:alive");
                 self.next_alive = now + Duration::from_secs(MAX_AGE as u64 / 2);
             }
-            match self.listener.accept() {
-                Ok((stream, _)) => self.handle(stream),
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(_) => {}
+            // The whole backlog, not one connection: a controller that has
+            // opened two sockets to read a description and post an action must
+            // not have the second one wait a tick behind the first.
+            for _ in 0..8 {
+                match self.listener.accept() {
+                    Ok((stream, peer)) => {
+                        trace(|| format!("accept {}", peer.port()));
+                        self.handle(stream)
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(e) => {
+                        trace(|| format!("accept failed: {e}"));
+                        break;
+                    }
+                }
             }
             if now >= self.next_poll {
                 self.publish_events(now);
@@ -512,24 +538,105 @@ impl Server {
 
     // ----------------------------------------------------------------- http
 
+    fn retire_lingering(&mut self, now: Instant) {
+        self.lingering.retain_mut(|(stream, due)| {
+            // Drain to the bottom of the receive buffer before any exit. A
+            // socket closed with unread bytes is aborted, and the resulting
+            // reset is addressed to the controller's source port — which a
+            // controller that has since exited can hand to its next
+            // connection, resetting a request that was never ours.
+            let mut sink = [0u8; 1024];
+            let mut fin = false;
+            let mut reset = false;
+            loop {
+                match stream.read(&mut sink) {
+                    Ok(0) => {
+                        fin = true;
+                        break;
+                    }
+                    Ok(_) => continue,
+                    Err(e) => {
+                        // A hard error (the peer's own reset) means there is no
+                        // teardown left to wait for; holding the socket only
+                        // keeps this four-tuple out of reach of the next call.
+                        reset = !matches!(
+                            e.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                        );
+                        break;
+                    }
+                }
+            }
+            if fin || reset {
+                let port = peer_port(stream);
+                trace(|| format!("peer {port}: closed ({})", if fin { "peer fin" } else { "reset" }));
+                return false;
+            }
+            if now >= *due {
+                let port = peer_port(stream);
+                trace(|| format!("peer {port}: deadline, closed drained"));
+                return false;
+            }
+            true
+        });
+    }
+
     fn handle(&mut self, stream: TcpStream) {
+        let peer = peer_port(&stream);
         let _ = stream.set_nodelay(true);
-        let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
+        // One connection at a time on this thread, so an upper bound on how
+        // long a silent probe can hold the control plane is worthwhile.
+        let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
         let _ = stream.set_write_timeout(Some(Duration::from_millis(800)));
         let mut reader = BufReader::new(stream);
         let request = match read_request(&mut reader) {
             Ok(request) => request,
+            // The peer hung up before asking anything; it has no reply to wait
+            // for. Still close it out through the linger list: dropping a
+            // half-open socket straight away is how the abort is answered with
+            // a reset, and a controller that reuses the port for its next call
+            // reads that reset as a failure of a request it has not sent yet.
+            Err(0) => {
+                trace(|| format!("peer {peer}: hung up"));
+                self.linger_close(reader.into_inner());
+                return;
+            }
             Err(status) => {
+                trace(|| format!("peer {peer}: -> {status}"));
                 let response = Response::text(status, status_reason(status).to_string());
-                let _ = write_response(reader.get_mut(), "", &response);
+                let mut stream = reader.into_inner();
+                let _ = write_response(&mut stream, "", &response);
+                self.linger_close(stream);
                 return;
             }
         };
+        trace(|| format!("peer {peer}: {} {}", request.method, request.path));
         let response = self.route(&request);
-        let _ = write_response(reader.get_mut(), &request.method, &response);
+        let mut stream = reader.into_inner();
+        if let Err(e) = write_response(&mut stream, &request.method, &response) {
+            trace(|| format!("peer {peer}: write failed: {e}"));
+        }
+        self.linger_close(stream);
         if let Some(sid) = response.initial_event {
             self.send_initial(&sid);
         }
+    }
+
+    /// Half-close the reply, then let the loop watch for the client's own FIN.
+    /// A controller that has to guess when the body ends waits for our close
+    /// instead of moving on to its next action, so the FIN goes out now; the
+    /// socket then stays on the list only long enough to read the peer's FIN,
+    /// because a socket dropped with unread bytes is aborted and the abort
+    /// destroys the reply the controller has not read yet.
+    fn linger_close(&mut self, stream: TcpStream) {
+        trace(|| format!("peer {}: fin sent", peer_port(&stream)));
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let _ = stream.set_nonblocking(true);
+        if self.lingering.len() >= 32 {
+            self.lingering.remove(0);
+        }
+        self.lingering
+            .push((stream, Instant::now() + Duration::from_millis(300)));
     }
 
     fn route(&mut self, request: &Request) -> Response {
@@ -551,14 +658,26 @@ impl Server {
                     return Response::text(405, "method not allowed".into());
                 }
                 if let Some(service) = SERVICES.iter().find(|service| service.control == path) {
+                    // The extension's SOAP fetch needs CORS: Content-Type text/xml and
+                    // SOAPACTION are not CORS-safelisted, so the browser sends a preflight.
+                    if method == "OPTIONS" {
+                        let mut response = Response::empty(204, Vec::new());
+                        response.headers.push(("Access-Control-Allow-Origin".into(), "*".into()));
+                        response.headers.push(("Access-Control-Allow-Methods".into(), "POST, OPTIONS".into()));
+                        response.headers.push(("Access-Control-Allow-Headers".into(), "Content-Type, SOAPACTION".into()));
+                        response.headers.push(("Access-Control-Max-Age".into(), "600".into()));
+                        return response;
+                    }
                     if method != "POST" {
                         return Response::text(405, "method not allowed".into());
                     }
-                    return match service.name {
+                    let mut response = match service.name {
                         AVT => self.control_avtransport(request),
                         RCS => self.control_rendering(request),
                         _ => self.control_connection(request),
                     };
+                    response.headers.push(("Access-Control-Allow-Origin".into(), "*".into()));
+                    return response;
                 }
                 if let Some(service) = SERVICES.iter().find(|service| service.event == path) {
                     return match method {
@@ -619,8 +738,20 @@ impl Server {
                     Err(_) => soap_error(501, "Action Failed"),
                 }
             }
-            // Accepted and forgotten: there is no playlist to put it in.
-            "SetNextAVTransportURI" => soap_ok(AVT, &action, &empty),
+            // Staged behind the current item, exactly as the spec reads it: it
+            // starts when the current one ends, and it survives until then.
+            "SetNextAVTransportURI" => {
+                let Some(uri) = xml_tag(&body, "NextURI") else {
+                    return soap_error(402, "Invalid Args");
+                };
+                if uri.trim().is_empty() {
+                    return soap_error(402, "Invalid Args");
+                }
+                match self.transport.set_next(uri.trim()) {
+                    Ok(()) => soap_ok(AVT, &action, &empty),
+                    Err(_) => soap_error(501, "Action Failed"),
+                }
+            }
             "Play" => match self.transport.play() {
                 Ok(()) => soap_ok(AVT, &action, &empty),
                 Err(_) => soap_error(501, "Action Failed"),
@@ -649,7 +780,22 @@ impl Server {
                     Err(_) => soap_error(711, "Illegal seek target"),
                 }
             }
-            "Next" | "Previous" => soap_error(701, "Transition not available"),
+            // A controller stepping through a list wants a reason, not silence:
+            // past the last item this answers 701, which is what every TV and
+            // phone reads as "there is no next".
+            "Next" => {
+                if !self.transport.has_next() {
+                    return soap_error(701, "Transition not available");
+                }
+                match self.transport.next() {
+                    Ok(()) => soap_ok(AVT, &action, &empty),
+                    Err(_) => soap_error(701, "Transition not available"),
+                }
+            }
+            "Previous" => match self.transport.previous() {
+                Ok(()) => soap_ok(AVT, &action, &empty),
+                Err(_) => soap_error(701, "Transition not available"),
+            },
             "GetTransportInfo" => {
                 let inner = format!(
                     "<CurrentTransportState>{}</CurrentTransportState>\
@@ -666,10 +812,17 @@ impl Server {
             }
             "GetPositionInfo" => {
                 let track = if state.uri.is_some() { 1 } else { 0 };
+                // DIDL is XML inside XML, so the document is escaped a second
+                // time on its way into this element.
+                let meta = self
+                    .transport
+                    .current()
+                    .map(|item| escape(&didl_metadata(&item)))
+                    .unwrap_or_default();
                 let inner = format!(
                     "<Track>{track}</Track>\
                      <TrackDuration>{dur}</TrackDuration>\
-                     <TrackMetaData></TrackMetaData>\
+                     <TrackMetaData>{meta}</TrackMetaData>\
                      <TrackURI>{uri}</TrackURI>\
                      <RelTime>{pos}</RelTime>\
                      <AbsTime>{pos}</AbsTime>\
@@ -711,7 +864,10 @@ impl Server {
                 "<PlayMode>NORMAL</PlayMode><RecQualityMode>NOT_IMPLEMENTED</RecQualityMode>",
             ),
             "GetCurrentTransportActions" => {
-                let inner = format!("<Actions>{}</Actions>", transport_actions(state.phase));
+                let inner = format!(
+                    "<Actions>{}</Actions>",
+                    transport_actions(state.phase, self.transport.has_next())
+                );
                 soap_ok(AVT, &action, &inner)
             }
             _ => soap_error(401, "Invalid Action"),
@@ -866,13 +1022,14 @@ impl Server {
             Some(subscription) => subscription.service,
             None => return,
         };
-        let body = event_body(service, &self.transport.state());
+        let body = event_body(service, &self.transport.state(), self.transport.has_next());
         self.deliver(sid, &body);
     }
 
     fn publish_events(&mut self, now: Instant) {
         let state = self.transport.state();
-        let key = EventKey::of(&state);
+        let has_next = self.transport.has_next();
+        let key = EventKey::of(&state, has_next);
         let Some(previous) = &self.last_event else {
             self.last_event = Some(key);
             return;
@@ -894,7 +1051,7 @@ impl Server {
         self.last_event = Some(key);
         self.last_event_at = now;
         for service in [AVT, RCS] {
-            let body = event_body(service, &state);
+            let body = event_body(service, &state, has_next);
             for sid in self.subs.sids(service) {
                 self.deliver(&sid, &body);
             }
@@ -1057,7 +1214,7 @@ fn post_notify(callback: &Callback, sid: &str, seq: u32, body: &str) -> std::io:
     stream.flush()
 }
 
-fn event_body(service: &str, state: &PlaybackState) -> String {
+fn event_body(service: &str, state: &PlaybackState, has_next: bool) -> String {
     let property = match service {
         AVT => {
             let last = format!(
@@ -1083,7 +1240,7 @@ fn event_body(service: &str, state: &PlaybackState) -> String {
                 hms(state.duration),
                 hms(state.position),
                 hms(state.position),
-                transport_actions(state.phase),
+                transport_actions(state.phase, has_next),
             );
             ("LastChange".to_string(), last)
         }
@@ -1127,10 +1284,11 @@ struct EventKey {
     muted: bool,
     position_s: u64,
     duration_s: u64,
+    has_next: bool,
 }
 
 impl EventKey {
-    fn of(state: &PlaybackState) -> Self {
+    fn of(state: &PlaybackState, has_next: bool) -> Self {
         Self {
             phase: state.phase,
             uri: state.uri.clone(),
@@ -1138,6 +1296,7 @@ impl EventKey {
             muted: state.muted,
             position_s: state.position.max(0.0) as u64,
             duration_s: state.duration.max(0.0) as u64,
+            has_next,
         }
     }
 }
@@ -1195,9 +1354,39 @@ impl Response {
     }
 }
 
+/// Verification trace for the control plane: `HORIZON_DLNA_TRACE=1` prints one
+/// line per socket event so a reset can be attributed to a side. Epoch
+/// milliseconds so a client log written at the same time lines up with it.
+fn trace_enabled() -> bool {
+    std::env::var_os("HORIZON_DLNA_TRACE").is_some()
+}
+
+fn trace(message: impl FnOnce() -> String) {
+    if trace_enabled() {
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        eprintln!("[dlna {ms}ms] {}", message());
+    }
+}
+
+fn peer_port(stream: &TcpStream) -> u16 {
+    stream.peer_addr().map(|a| a.port()).unwrap_or(0)
+}
+
 fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Request, u16> {
     let mut budget = 64 * 1024usize;
-    let start = read_line(reader, &mut budget)?;
+    let start = match read_line(reader, &mut budget) {
+        Ok(line) => line,
+        // 0 is reserved for "the peer hung up": on a kept-alive connection
+        // that is the normal end of the conversation, not a bad request.
+        Err(0) => return Err(0),
+        Err(_) => return Err(400),
+    };
+    if start.is_empty() {
+        return Err(0);
+    }
     let mut parts = start.split_whitespace();
     let method = parts.next().ok_or(400u16)?.to_ascii_uppercase();
     let target = parts.next().ok_or(400u16)?;
@@ -1250,7 +1439,12 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Request, u16> {
     }
     let mut body = vec![0u8; length];
     if length > 0 {
-        reader.read_exact(&mut body).map_err(|_| 400u16)?;
+        if let Err(e) = reader.read_exact(&mut body) {
+            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                return Err(0);
+            }
+            return Err(400);
+        }
     }
     Ok(Request {
         method,
@@ -1262,9 +1456,22 @@ fn read_request(reader: &mut BufReader<TcpStream>) -> Result<Request, u16> {
 
 fn read_line(reader: &mut impl BufRead, budget: &mut usize) -> Result<String, u16> {
     let mut line = String::new();
-    let n = reader.read_line(&mut line).map_err(|_| 400u16)?;
+    let n = match reader.read_line(&mut line) {
+        Ok(n) => n,
+        // A read timeout is this thread giving up on the socket, not a request
+        // worth an error page: 0 ends the conversation quietly.
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ) =>
+        {
+            return Err(0)
+        }
+        Err(_) => return Err(400),
+    };
     if n == 0 {
-        return Err(400);
+        return Err(0);
     }
     *budget = budget.saturating_sub(n);
     if *budget == 0 {
@@ -1290,11 +1497,14 @@ fn write_response(
         head.push_str(&format!("{name}: {value}\r\n"));
     }
     head.push_str("\r\n");
-    stream.write_all(head.as_bytes())?;
+    // One segment for the whole reply: a client that sees the connection end
+    // while the body is still on its way reports a reset rather than the
+    // answer it was given.
+    let mut reply = head.into_bytes();
     if method != "HEAD" {
-        stream.write_all(&response.body)?;
+        reply.extend_from_slice(&response.body);
     }
-    stream.flush()
+    stream.write_all(&reply)
 }
 
 fn status_reason(status: u16) -> &'static str {
@@ -1379,14 +1589,87 @@ fn transport_state(phase: Phase) -> &'static str {
     }
 }
 
-fn transport_actions(phase: Phase) -> &'static str {
-    match phase {
+fn transport_actions(phase: Phase, has_next: bool) -> String {
+    let base = match phase {
         Phase::Idle | Phase::Loading => "",
         Phase::Playing => "Play,Pause,Stop,Seek",
         Phase::Paused => "Play,Stop,Seek",
         Phase::Stopped | Phase::Ended => "Play,Seek",
         Phase::Error => "",
+    };
+    // `Next` is only listed when the queue really has something after this;
+    // `Previous` is never listed, because stepping back is always allowed on a
+    // player but this transport cannot say which item that would land on.
+    if base.is_empty() || !has_next {
+        base.to_string()
+    } else {
+        format!("{base},Next")
     }
+}
+
+/// The only mime this device can name is the one the address itself spells out.
+/// A library address is `/media/<id>` — the hub answers with the real
+/// `Content-Type`, but the renderer has no reason to guess one here, so the
+/// wildcard is what a controller gets.
+fn mime_of(uri: &str) -> &'static str {
+    let lower = uri.to_ascii_lowercase();
+    let path = lower.split(['?', '#']).next().unwrap_or(&lower);
+    [
+        (".mp4", "video/mp4"),
+        (".m4v", "video/mp4"),
+        (".mkv", "video/x-matroska"),
+        (".avi", "video/x-msvideo"),
+        (".mpeg", "video/mpeg"),
+        (".mpg", "video/mpeg"),
+        (".ts", "video/mp2t"),
+        (".mov", "video/quicktime"),
+        (".webm", "video/webm"),
+        (".mp3", "audio/mpeg"),
+        (".m4a", "audio/mp4"),
+        (".wav", "audio/wav"),
+        (".flac", "audio/flac"),
+        (".ogg", "audio/ogg"),
+        (".opus", "audio/opus"),
+        (".wma", "audio/x-ms-wma"),
+        (".jpg", "image/jpeg"),
+        (".jpeg", "image/jpeg"),
+        (".png", "image/png"),
+        (".gif", "image/gif"),
+        (".bmp", "image/bmp"),
+        (".webp", "image/webp"),
+    ]
+    .iter()
+    .find(|(ext, _)| path.ends_with(ext))
+    .map(|(_, mime)| *mime)
+    .unwrap_or("*")
+}
+
+/// DIDL-Lite for the item on the wire. A controller draws exactly what is in
+/// here, so the class has to be right — a photo announced as a video item is a
+/// grey tile on a TV — and nothing goes in that this device does not know:
+/// no invented album art, no fake duration, no made-up artist.
+fn didl_metadata(track: &Track) -> String {
+    let class = match track.kind {
+        MediaKind::Video => "object.item.videoItem",
+        MediaKind::Audio => "object.item.audioItem.musicTrack",
+        MediaKind::Image => "object.item.imageItem.photo",
+    };
+    let protocol = format!("http-get:*:{}:*", mime_of(&track.uri));
+    format!(
+        "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" \
+         xmlns:dc=\"http://purl.org/dc/elements/1.1/\" \
+         xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\"> \
+         <item id=\"{}\" parentID=\"-1\" restricted=\"1\"> \
+         <dc:title>{}</dc:title> \
+         <upnp:class>{}</upnp:class> \
+         <res protocolInfo=\"{}\">{}</res> \
+         </item> </DIDL-Lite>",
+        escape(&track.id),
+        escape(&track.title),
+        class,
+        escape(&protocol),
+        escape(&track.uri)
+    )
 }
 
 fn hms(seconds: f64) -> String {
@@ -1857,6 +2140,8 @@ mod tests {
         state: PlaybackState,
         loads: Vec<String>,
         seeks: Vec<f64>,
+        next: Option<String>,
+        has_next: bool,
     }
 
     impl Default for Fake {
@@ -1866,6 +2151,8 @@ mod tests {
                     state: PlaybackState::default(),
                     loads: Vec::new(),
                     seeks: Vec::new(),
+                    next: None,
+                    has_next: false,
                 }),
             }
         }
@@ -1878,6 +2165,10 @@ mod tests {
 
         fn set_duration(&self, seconds: f64) {
             self.inner().state.duration = seconds;
+        }
+
+        fn set_has_next(&self, value: bool) {
+            self.inner().has_next = value;
         }
     }
 
@@ -1928,6 +2219,38 @@ mod tests {
         fn state(&self) -> PlaybackState {
             self.inner().state.clone()
         }
+
+        fn set_next(&self, uri: &str) -> CastResult<()> {
+            self.inner().next = Some(uri.to_string());
+            Ok(())
+        }
+
+        fn next(&self) -> CastResult<()> {
+            let mut inner = self.inner();
+            if !inner.has_next {
+                return Err(CastError::Unsupported("nothing after this"));
+            }
+            inner.state.uri = Some(
+                inner
+                    .next
+                    .take()
+                    .unwrap_or_else(|| "http://list/next".to_string()),
+            );
+            inner.state.phase = Phase::Stopped;
+            inner.state.position = 0.0;
+            Ok(())
+        }
+
+        fn previous(&self) -> CastResult<()> {
+            let mut inner = self.inner();
+            inner.state.uri = Some("http://list/previous".to_string());
+            inner.state.phase = Phase::Stopped;
+            Ok(())
+        }
+
+        fn has_next(&self) -> bool {
+            self.inner().has_next
+        }
     }
 
     fn start(fake: Arc<Fake>) -> Dmr {
@@ -1937,6 +2260,7 @@ mod tests {
                 bind: Ipv4Addr::LOCALHOST,
                 port: 0,
                 show_video: false,
+                video_parent: None,
                 advertise: false,
             },
             fake,
@@ -1970,6 +2294,26 @@ mod tests {
             body.len()
         );
         http(port, &request)
+    }
+
+    #[test]
+    #[ignore]
+    fn control_plane_stress_listener() {
+        let mut dmr = Dmr::start_with(
+            DmrConfig {
+                friendly_name: "HORIZON Stress".into(),
+                bind: Ipv4Addr::UNSPECIFIED,
+                port: 0,
+                show_video: false,
+                video_parent: None,
+                advertise: false,
+            },
+            Arc::new(Fake::default()),
+        )
+        .expect("dmr");
+        eprintln!("stress at {}", dmr.info().location);
+        std::thread::sleep(Duration::from_secs(180));
+        dmr.stop();
     }
 
     #[test]
@@ -2098,6 +2442,151 @@ mod tests {
             "<InstanceID>0</InstanceID><Unit>REL_TIME</Unit><Target>banana</Target>",
         );
         assert!(seek.contains("<errorCode>711</errorCode>"), "{seek}");
+    }
+
+    #[test]
+    fn a_controller_stages_a_next_item_and_steps_through_the_list() {
+        let fake = Arc::new(Fake::default());
+        let dmr = start(Arc::clone(&fake));
+        let port = dmr.info().port;
+        soap_request(
+            port,
+            AVT,
+            "SetAVTransportURI",
+            "<InstanceID>0</InstanceID><CurrentURI>http://hub/media/第一首.mp3</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>",
+        );
+
+        // End of a list is a reason, not a silent success: this is what a TV
+        // reads as "there is nothing after this".
+        let early = soap_request(port, AVT, "Next", "<InstanceID>0</InstanceID>");
+        assert!(early.contains("<errorCode>701</errorCode>"), "{early}");
+        let actions = soap_request(
+            port,
+            AVT,
+            "GetCurrentTransportActions",
+            "<InstanceID>0</InstanceID>",
+        );
+        assert!(!actions.contains("Next"), "{actions}");
+
+        let staged = soap_request(
+            port,
+            AVT,
+            "SetNextAVTransportURI",
+            "<InstanceID>0</InstanceID><NextURI>http://hub/media/第二首.mp3</NextURI><NextURIMetaData></NextURIMetaData>",
+        );
+        assert!(
+            staged.contains("SetNextAVTransportURIResponse"),
+            "{staged}"
+        );
+        assert_eq!(
+            fake.inner().next.as_deref(),
+            Some("http://hub/media/第二首.mp3")
+        );
+        assert_eq!(
+            fake.inner().loads.len(),
+            1,
+            "staging must not load the item early"
+        );
+
+        let missing = soap_request(
+            port,
+            AVT,
+            "SetNextAVTransportURI",
+            "<InstanceID>0</InstanceID>",
+        );
+        assert!(missing.contains("<errorCode>402</errorCode>"), "{missing}");
+        let blank = soap_request(
+            port,
+            AVT,
+            "SetNextAVTransportURI",
+            "<InstanceID>0</InstanceID><NextURI>   </NextURI>",
+        );
+        assert!(blank.contains("<errorCode>402</errorCode>"), "{blank}");
+
+        fake.set_has_next(true);
+        let actions = soap_request(
+            port,
+            AVT,
+            "GetCurrentTransportActions",
+            "<InstanceID>0</InstanceID>",
+        );
+        assert!(actions.contains("Next"), "{actions}");
+
+        let stepped = soap_request(port, AVT, "Next", "<InstanceID>0</InstanceID>");
+        assert!(stepped.contains("NextResponse"), "{stepped}");
+        assert_eq!(
+            fake.inner().state.uri.as_deref(),
+            Some("http://hub/media/第二首.mp3"),
+            "the staged item is what starts"
+        );
+        assert!(fake.inner().next.is_none(), "and it is consumed by the step");
+        assert_eq!(
+            fake.inner().loads.len(),
+            1,
+            "stepping is the queue moving, not a second load"
+        );
+
+        let back = soap_request(port, AVT, "Previous", "<InstanceID>0</InstanceID>");
+        assert!(back.contains("PreviousResponse"), "{back}");
+        assert_eq!(
+            fake.inner().state.uri.as_deref(),
+            Some("http://list/previous")
+        );
+    }
+
+    #[test]
+    fn track_metadata_names_the_class_and_only_mimes_what_the_address_proves() {
+        let fake = Arc::new(Fake::default());
+        let dmr = start(Arc::clone(&fake));
+        let port = dmr.info().port;
+
+        let didl_for = |uri: &str| {
+            soap_request(
+                port,
+                AVT,
+                "SetAVTransportURI",
+                &format!(
+                    "<InstanceID>0</InstanceID><CurrentURI>{uri}</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>"
+                ),
+            );
+            let info = soap_request(port, AVT, "GetPositionInfo", "<InstanceID>0</InstanceID>");
+            assert!(
+                info.contains("&lt;DIDL-Lite"),
+                "a document inside an element is escaped: {info}"
+            );
+            unescape(
+                &xml_tag(&info, "TrackMetaData").expect("track metadata"),
+            )
+        };
+
+        let photo = didl_for("http://127.0.0.1:7878/media/照片.jpg");
+        assert!(photo.contains("xmlns:dc=\"http://purl.org/dc/elements/1.1/\""), "{photo}");
+        assert!(photo.contains("<upnp:class>object.item.imageItem.photo</upnp:class>"), "{photo}");
+        assert!(photo.contains("<dc:title>照片.jpg</dc:title>"), "{photo}");
+        assert!(photo.contains("protocolInfo=\"http-get:*:image/jpeg:*\""), "{photo}");
+        assert!(
+            photo.contains(">http://127.0.0.1:7878/media/照片.jpg</res>"),
+            "{photo}"
+        );
+
+        let song = didl_for("http://127.0.0.1:7878/media/背景音乐.mp3");
+        assert!(
+            song.contains("<upnp:class>object.item.audioItem.musicTrack</upnp:class>"),
+            "{song}"
+        );
+        assert!(song.contains("protocolInfo=\"http-get:*:audio/mpeg:*\""), "{song}");
+
+        // A library address spells out no extension, so the mime stays a
+        // wildcard: the hub answers with the real Content-Type, the renderer
+        // will not invent one.
+        let stored = didl_for("http://127.0.0.1:7878/media/20e2c4680433");
+        assert!(stored.contains("protocolInfo=\"http-get:*:*:*\""), "{stored}");
+        assert!(
+            stored.contains("<upnp:class>object.item.videoItem</upnp:class>"),
+            "{stored}"
+        );
+        assert_eq!(stored.matches("<item ").count(), 1, "{stored}");
+        assert!(stored.contains("</DIDL-Lite>"), "{stored}");
     }
 
     #[test]

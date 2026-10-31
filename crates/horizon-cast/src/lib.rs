@@ -11,6 +11,7 @@
 //! - [`session`] — sender/receiver state machines and the sockets they run on.
 //! - [`discovery`] — mDNS and SSDP.
 //! - [`dlna`] — the UPnP MediaRenderer a television or controller drives.
+//! - [`queue`] — the playlist above one transport: order, repeat, auto-advance.
 //! - [`cast`] — the Google Cast v2 sender for Chromecast and Cast-enabled TVs.
 //! - [`cast_recv`] — the Google Cast v2 receiver (this machine as a Chromecast).
 //! - [`airplay`] — the AirPlay 1 (RAOP) audio receiver.
@@ -37,5 +38,7 @@ pub mod browser;
 pub mod codec;
 #[cfg(windows)]
 pub mod player;
+#[cfg(windows)]
+pub mod queue;
 
 pub use error::{CastError, CastResult};

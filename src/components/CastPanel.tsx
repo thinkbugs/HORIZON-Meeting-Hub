@@ -1066,7 +1066,7 @@ function DlnaCard({
               {busy ? "处理中" : status ? "已开启" : "已关闭"}
             </span>
           </div>
-          <p>电视与视频应用通过 UPnP 投放的媒体，视频显示在独立播放窗口。</p>
+          <p>电视与视频应用通过 UPnP 投放的媒体，画面直接铺在大屏舞台上，播放、暂停、进度和音量在本机也能控制。</p>
         </div>
         <Switch checked={Boolean(status)} onChange={onToggle} label="DLNA 视频接收" />
       </div>

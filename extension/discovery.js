@@ -5,8 +5,28 @@
 
 const HORIZON_DISCOVERY_PORT = 9407;
 const PROBE_BUDGET_MS = 700;
-const SWEEP_CONCURRENCY = 48;
+// Measured on a three-interface machine (192.168.0.x, 192.168.137.x, 172.19.224.x
+// — 762 hosts). A probe aborted at the 700 ms budget does not cancel its TCP
+// connect: Chrome keeps the socket in the pool, so every dead host in the /24
+// leaves one hanging connect behind, and at 48 workers the pool saturates before
+// the sweep ends. Right after such a sweep the page's own reads answered in
+// 3–6 s or not at all while `curl` from the same machine answered in 40 ms —
+// including reads to 127.0.0.1, which is what proves it is the browser's pool and
+// not the receiver. At 16 the page stayed healthy (all five addresses in ≤51 ms);
+// at 24 one read still timed out. Smaller is slower, not worse: the worker keeps
+// sweeping after the popup paints the receiver it already knows.
+const SWEEP_CONCURRENCY = 16;
 const PROGRESS_INTERVAL_MS = 250;
+// 一个 /24 扫完之后，Chrome 里还挂着那些被 abort 的 connect，页面在几秒内打不开
+// 任何新连接（node 侧同一时刻 24 ms）。实测：254 个地址、16 并发，扫完立刻读
+// 9407 与 7878 三次全部 3 s 超时，约 10 s 后恢复。操作员扫完的下一个动作就是点
+// 投放，所以"扫完"要以选中的那台此刻答得出为准，而不是以最后一个探针返回为准。
+const SETTLE_ATTEMPTS = 12;
+const SETTLE_DELAY_MS = 500;
+// Probing stops here for the length of the pool's recovery window: a sweep that
+// starts sooner aborts every probe and reports only what loopback answered.
+const SWEEP_COOLDOWN_MS = 12000;
+let lastSweepEndedAt = 0;
 
 async function localPrefixes(extraHost) {
   const prefixes = new Set();
@@ -30,6 +50,14 @@ async function localPrefixes(extraHost) {
     seen.add(prefix);
     prefixes.add(prefix);
   }
+  // When the browser reports no interfaces (some Chrome builds / enterprise
+  // policies), fall back to the three most common private /24 ranges so a
+  // receiver on a typical home or office LAN is still reachable.
+  if (prefixes.size === 0) {
+    for (const fallback of ["192.168.0", "192.168.1", "10.0.0"]) {
+      prefixes.add(fallback);
+    }
+  }
   // A hand-typed address deserves a probe even when its subnet is not one of the
   // machine's own interfaces — that is how a receiver on another VLAN still gets
   // found after the operator wrote it in once.
@@ -40,8 +68,15 @@ async function localPrefixes(extraHost) {
   return [...prefixes];
 }
 
-async function candidateHosts(extraHost) {
-  const hosts = new Set(["127.0.0.1"]);
+async function candidateHosts(extraHost, preferred) {
+  const hosts = new Set();
+  // The receiver this room used last answers in milliseconds while a full sweep
+  // of three /24s takes half a minute at a concurrency the browser's socket pool
+  // can survive, so it is probed before anything else: the popup has a receiver to
+  // paint while the worker is still grinding through the silent addresses.
+  const remembered = String(preferred ?? "").split(":")[0];
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(remembered)) hosts.add(remembered);
+  hosts.add("127.0.0.1");
   for (const prefix of await localPrefixes(extraHost)) {
     for (let index = 1; index < 255; index += 1) hosts.add(`${prefix}.${index}`);
   }
@@ -64,6 +99,10 @@ async function probe(host) {
           host: `${host}:${info.port ?? HORIZON_DISCOVERY_PORT}`,
           name: info.name || "HORIZON 接收端",
           paired: Boolean(info.paired),
+          // The hub port is the receiver's to know: 7878 is today's default, and a
+          // room that moved it would otherwise leave the 片库 pane pointed at a
+          // port that answers something else. Null = this build has no library.
+          hub: Number.isInteger(info.hub) && info.hub > 0 ? info.hub : null,
         };
       }
     }
@@ -112,14 +151,29 @@ function rank(receivers, preferred) {
   );
 }
 
+/** Answer once more whether the chosen receiver can be reached right now. */
+async function reachable(host) {
+  for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt += 1) {
+    const receiver = await probe(String(host).split(":")[0]);
+    if (receiver) return true;
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+  }
+  return false;
+}
+
 /**
  * Sweep the machine's own subnets and report every HORIZON receiver found.
  * `onProgress` fires as answers arrive (throttled) and once more when done, so
  * the caller can paint results without waiting out the silent addresses.
  */
 async function sweep({ preferred = null, extraHost = "", onProgress } = {}) {
-  const queue = [...(await candidateHosts(extraHost))];
+  const cooling = SWEEP_COOLDOWN_MS - (Date.now() - lastSweepEndedAt);
+  if (lastSweepEndedAt && cooling > 0) {
+    await new Promise((resolve) => setTimeout(resolve, cooling));
+  }
+  const queue = [...(await candidateHosts(extraHost, preferred))];
   const found = [];
+  const total = queue.length;
   let selected = preferred && queue.length ? preferred : null;
   let lastPaint = 0;
 
@@ -143,12 +197,18 @@ async function sweep({ preferred = null, extraHost = "", onProgress } = {}) {
     }
   });
   await Promise.all(workers);
+  // The recovery window starts when probing stops, not when the settle below ends.
+  lastSweepEndedAt = Date.now();
 
   const receivers = rank(found, preferred);
   selected =
     preferred && receivers.some((item) => item.host === preferred)
       ? preferred
       : (receivers[0]?.host ?? null);
+  // A sweep of more than a couple of workers is what leaves the hanging connects
+  // behind; a short one (the remembered host plus loopback) cannot starve the
+  // pool, so it must not pay the wait.
+  if (selected && total > SWEEP_CONCURRENCY * 2) await reachable(selected);
   paint(true);
   return { receivers, selected };
 }

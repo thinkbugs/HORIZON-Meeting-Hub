@@ -19,6 +19,7 @@ import android.os.Looper
 import android.util.DisplayMetrics
 import android.view.Display
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.min
@@ -36,20 +37,32 @@ class MirrorService : Service() {
     private var encoder: VideoEncoder? = null
     private var writer: Thread? = null
     private var statsThread: Thread? = null
+    private var keepalive: Thread? = null
+    private var reconnectThread: Thread? = null
     private var displayListener: DisplayManager.DisplayListener? = null
 
-    private val queue = ArrayBlockingQueue<ByteArray>(16)
+    // Small on purpose: a deep queue turns a slow socket into growing latency.
+    // When it fills, the drain thread blocks instead — the encoder then stops
+    // accepting frames and the display drops them before they are encoded,
+    // which keeps the H.264 reference chain intact.
+    private val queue = ArrayBlockingQueue<ByteArray>(4)
     private val stopping = AtomicBoolean(false)
     private val frames = AtomicLong()
     private val bytes = AtomicLong()
     private val dropped = AtomicLong()
 
     @Volatile private var token = ""
+    @Volatile private var host = ""
+    @Volatile private var port = Discovery.PORT
     @Volatile private var targetLabel = ""
+    /** True once the socket has been accepted at least once this session. */
+    @Volatile private var opened = false
+    @Volatile private var linkUp = false
 
     override fun onCreate() {
         super.onCreate()
         projectionManager = getSystemService(MediaProjectionManager::class.java)
+        Prefs.init(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -75,8 +88,10 @@ class MirrorService : Service() {
         // A previous stop may still be tearing down this same instance; the
         // latch has to be cleared before the writer/stats threads look at it.
         stopping.set(false)
-        val host = intent.getStringExtra(EXTRA_HOST).orEmpty()
-        val port = intent.getIntExtra(EXTRA_PORT, Discovery.PORT)
+        opened = false
+        linkUp = false
+        host = intent.getStringExtra(EXTRA_HOST).orEmpty()
+        port = intent.getIntExtra(EXTRA_PORT, Discovery.PORT)
         token = intent.getStringExtra(EXTRA_TOKEN).orEmpty()
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
         val resultData = if (Build.VERSION.SDK_INT >= 33) {
@@ -117,25 +132,59 @@ class MirrorService : Service() {
         this.projection = projection
         watchRotation(projection)
 
-        Thread({
+        Thread({ runConnect() }, "ws-connect").start()
+    }
+
+    /**
+     * Dial with backoff and stay alive across socket drops: the projection is
+     * kept alive for [MAX_RETRIES] attempts so a router hiccup costs a second
+     * of black screen instead of the whole session.
+     */
+    private fun runConnect() {
+        var retries = 0
+        while (!stopping.get()) {
+            if (retries > 0) {
+                MirrorState.retrying(
+                    if (opened) "连接中断，重连中（$retries/$MAX_RETRIES）"
+                    else "正在重试连接（$retries/$MAX_RETRIES）· $targetLabel",
+                )
+                try {
+                    Thread.sleep(retryDelayMs(retries))
+                } catch (_: InterruptedException) {
+                    return
+                }
+            }
+            if (stopping.get()) return
             val client = WsClient(host, port, "/stream?token=$token", socketListener)
             ws = client
             try {
                 client.connect()
+                return
+            } catch (error: WsClient.Rejected) {
+                MirrorState.fail(error.message ?: "连接被拒绝")
+                stopMirror("连接被拒绝")
+                return
             } catch (error: Exception) {
-                MirrorState.fail(error.message ?: "连接失败")
-                stopMirror("连接失败")
+                if (ws === client) ws = null
+                if (stopping.get()) return
+                retries++
+                val reason = error.message ?: "连接失败"
+                if (retries > MAX_RETRIES) {
+                    MirrorState.fail(if (opened) "投屏已断开：$reason" else "连不上 $targetLabel：$reason")
+                    stopMirror("连接失败")
+                    return
+                }
             }
-        }, "ws-connect").start()
+        }
     }
 
     private fun startEncoder() {
         val projection = projection ?: return
-        val (width, height, dpi) = captureSpec()
+        val (width, height, dpi) = captureSpec(Prefs.maxEdge)
         val encoder = VideoEncoder(encoderSink)
         this.encoder = encoder
         try {
-            encoder.start(projection, width, height, dpi)
+            encoder.start(projection, width, height, dpi, Prefs.fps)
         } catch (error: Exception) {
             MirrorState.fail("编码器启动失败：${error.message}")
             stopMirror("编码器启动失败")
@@ -144,25 +193,49 @@ class MirrorService : Service() {
 
     private val socketListener = object : WsClient.Listener {
         override fun onOpen() {
-            ws?.sendText("""{"type":"hello"}""")
+            if (stopping.get()) return
             val client = ws ?: return
+            if (opened) MirrorState.log("已重新连接 $targetLabel")
+            opened = true
+            linkUp = true
+            client.sendText("""{"type":"hello"}""")
+            // The encoder and its VirtualDisplay survive a dropped socket: tearing
+            // them down invalidates the projection token, after which Android
+            // refuses to create another display on it.
+            if (encoder == null) startEncoder()
+            if (stopping.get()) {
+                linkUp = false
+                client.close()
+                return
+            }
+            encoder?.requestKeyFrame()
             startWriter(client)
-            startEncoder()
             startStats()
+            startKeepalive(client)
+            updateNotification("正在投屏 · $targetLabel")
             MirrorState.live("正在投屏 · $targetLabel")
         }
 
         override fun onText(text: String) {
-            when {
-                text.contains("\"keyframe\"") -> encoder?.requestKeyFrame()
-                text.contains("\"welcome\"") -> MirrorState.live("正在投屏 · $targetLabel")
-            }
+            if (text.contains("\"keyframe\"")) encoder?.requestKeyFrame()
         }
 
         override fun onClosed(reason: String) {
             if (stopping.get()) return
-            MirrorState.fail(reason)
-            stopMirror(reason)
+            MirrorState.log(reason)
+            synchronized(this@MirrorService) {
+                if (reconnectThread?.isAlive == true) return
+            }
+            val thread = Thread({
+                teardownLink()
+                ws = null
+                if (stopping.get()) return@Thread
+                MirrorState.retrying("连接中断，正在重连 · $targetLabel")
+                updateNotification("正在重连 $targetLabel")
+                runConnect()
+            }, "ws-reconnect")
+            reconnectThread = thread
+            thread.start()
         }
     }
 
@@ -170,6 +243,12 @@ class MirrorService : Service() {
 
     private val encoderSink = object : VideoEncoder.Sink {
         override fun onVideo(data: ByteArray, keyframe: Boolean, width: Int, height: Int, ptsUs: Long) {
+            // While the socket is down the encoder keeps its reference chain
+            // alive; the frames it produces are simply thrown away.
+            if (!linkUp) {
+                dropped.incrementAndGet()
+                return
+            }
             frames.incrementAndGet()
             bytes.addAndGet(data.size.toLong())
             // Bit 1 marks pts as sender wall clock, exactly like offscreen.js.
@@ -179,23 +258,52 @@ class MirrorService : Service() {
     }
 
     private fun enqueue(packet: ByteArray, keyframe: Boolean) {
-        if (queue.offer(packet)) return
+        try {
+            if (queue.offer(packet, 500, TimeUnit.MILLISECONDS)) return
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return
+        }
+        // The socket has been stuck for half a second. Anything still queued is
+        // stale, and this frame may reference ones the receiver never got, so
+        // start over from an IDR instead of shipping a broken chain.
         dropped.incrementAndGet()
+        queue.clear()
         if (keyframe) {
-            queue.clear()
             queue.offer(packet)
+        } else {
+            encoder?.requestKeyFrame()
         }
     }
 
     private fun startWriter(client: WsClient) {
         writer = Thread({
             try {
-                while (!stopping.get()) {
-                    client.sendBinary(queue.take())
+                while (!stopping.get() && client.isOpen()) {
+                    if (!client.sendBinary(queue.take())) break
                 }
             } catch (_: InterruptedException) {
             }
         }, "video-writer").apply { start() }
+    }
+
+    /**
+     * A static screen encodes nothing at all, so without this the socket is
+     * silent for as long as the user is reading. Pings double as liveness
+     * detection: a failed write tears the socket down and triggers a retry.
+     */
+    private fun startKeepalive(client: WsClient) {
+        keepalive = Thread({
+            while (!stopping.get() && client.isOpen()) {
+                try {
+                    Thread.sleep(KEEPALIVE_MS)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                if (!client.isOpen()) break
+                client.ping()
+            }
+        }, "ws-keepalive").apply { start() }
     }
 
     private fun startStats() {
@@ -213,6 +321,10 @@ class MirrorService : Service() {
                 MirrorState.fps = (nowFrames - lastFrames).toInt()
                 MirrorState.kbps = ((nowBytes - lastBytes) * 8 / 1000).toInt()
                 MirrorState.drops = dropped.get()
+                encoder?.relayStats()?.let { (captured, swapMs) ->
+                    MirrorState.captureFps = captured
+                    MirrorState.swapMs = swapMs
+                }
                 lastFrames = nowFrames
                 lastBytes = nowBytes
             }
@@ -221,14 +333,14 @@ class MirrorService : Service() {
 
     // ------------------------------------------------------------- display
 
-    private fun captureSpec(): Triple<Int, Int, Int> {
+    private fun captureSpec(maxEdge: Int): Triple<Int, Int, Int> {
         val manager = getSystemService(DisplayManager::class.java)
         val display = manager.getDisplay(Display.DEFAULT_DISPLAY)
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
         display.getRealMetrics(metrics)
         val longest = maxOf(metrics.widthPixels, metrics.heightPixels).coerceAtLeast(1)
-        val scale = min(1f, 1920f / longest)
+        val scale = min(1f, maxEdge.coerceAtLeast(480).toFloat() / longest)
         val width = (metrics.widthPixels * scale).roundToInt() and 0x7FFFFFFE
         val height = (metrics.heightPixels * scale).roundToInt() and 0x7FFFFFFE
         val dpi = (metrics.densityDpi * scale).roundToInt().coerceAtLeast(120)
@@ -246,9 +358,9 @@ class MirrorService : Service() {
                 if (displayId != Display.DEFAULT_DISPLAY) return
                 Handler(Looper.getMainLooper()).postDelayed({
                     if (stopping.get()) return@postDelayed
-                    val (width, height, dpi) = captureSpec()
+                    val (width, height, dpi) = captureSpec(Prefs.maxEdge)
                     try {
-                        encoder?.resize(projection, width, height, dpi)
+                        encoder?.resize(projection, width, height, dpi, Prefs.fps)
                     } catch (_: Exception) {
                     }
                 }, 350)
@@ -260,20 +372,35 @@ class MirrorService : Service() {
 
     // --------------------------------------------------------------- stop
 
-    private fun stopMirror(reason: String) {
-        if (!stopping.compareAndSet(false, true)) return
-        if (!MirrorState.failed) MirrorState.idle(reason)
-        MirrorState.streaming = false
-        MirrorState.fps = 0
-        MirrorState.kbps = 0
-
-        encoder?.stop()
-        encoder = null
+    /** Drops the socket side of the session; capture and the encoder stay up. */
+    private fun teardownLink() {
+        linkUp = false
+        keepalive?.interrupt()
+        keepalive = null
         statsThread?.interrupt()
         statsThread = null
         writer?.interrupt()
         writer = null
         queue.clear()
+        MirrorState.fps = 0
+        MirrorState.kbps = 0
+    }
+
+    private fun teardownStream() {
+        teardownLink()
+        encoder?.stop()
+        encoder = null
+        MirrorState.captureFps = -1
+        MirrorState.resolution = ""
+    }
+
+    private fun stopMirror(reason: String) {
+        if (!stopping.compareAndSet(false, true)) return
+        if (!MirrorState.failed) MirrorState.idle(reason)
+
+        teardownStream()
+        reconnectThread?.interrupt()
+        reconnectThread = null
         ws?.close()
         ws = null
         displayListener?.let { listener ->
@@ -295,6 +422,14 @@ class MirrorService : Service() {
     }
 
     // -------------------------------------------------------- notification
+
+    private fun updateNotification(text: String) {
+        if (stopping.get()) return
+        try {
+            startForegroundCompat(text)
+        } catch (_: Exception) {
+        }
+    }
 
     private fun startForegroundCompat(text: String) {
         val manager = getSystemService(NotificationManager::class.java)
@@ -349,6 +484,13 @@ class MirrorService : Service() {
         private const val EXTRA_RESULT_DATA = "resultData"
         private const val CHANNEL_ID = "mirror"
         private const val NOTIFICATION_ID = 41
+
+        const val MAX_RETRIES = 5
+        private const val KEEPALIVE_MS = 3_000L
+        private val RETRY_DELAYS_MS = longArrayOf(1_000, 2_000, 4_000, 8_000, 8_000)
+
+        internal fun retryDelayMs(retry: Int): Long =
+            RETRY_DELAYS_MS[(retry - 1).coerceIn(0, RETRY_DELAYS_MS.lastIndex)]
 
         fun start(
             context: Context,
